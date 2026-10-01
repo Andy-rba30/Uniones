@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Núcleo geométrico y normativo. NO depende de Revit: se puede probar con xUnit
+    en cualquier sistema operativo y reutilizar desde otros adaptadores (AutoCAD, Tekla).
+    Unidades internas: milímetros y MPa.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>UnionesAcero.Core</RootNamespace>
+    <AssemblyName>UnionesAcero.Core</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

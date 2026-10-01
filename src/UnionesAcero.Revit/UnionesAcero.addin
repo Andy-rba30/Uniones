@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>Uniones Acero</Name>
+    <Assembly>UnionesAcero\UnionesAcero.Revit.dll</Assembly>
+    <AddInId>7E3C1F7A-6B0D-4D7B-9A2E-5C2F1A9B0C01</AddInId>
+    <FullClassName>UnionesAcero.Revit.App</FullClassName>
+    <VendorId>UNIO</VendorId>
+    <VendorDescription>Uniones Acero - detallado de nudos viga-columna</VendorDescription>
+  </AddIn>
+</RevitAddIns>
