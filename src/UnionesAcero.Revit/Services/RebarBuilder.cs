@@ -2,6 +2,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Structure;
 using UnionesAcero.Core.Analysis;
 using UnionesAcero.Core.Geometry;
+using UnionesAcero.Core.Verification;
 
 namespace UnionesAcero.Revit.Services;
 
@@ -116,6 +117,112 @@ public sealed class RebarBuilder
 
         var comments = rebar.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
         if (comments != null && !comments.IsReadOnly) comments.Set("UnionesAcero: " + group.Comment);
+
+        return rebar;
+    }
+
+    /// <summary>
+    /// Crea la barra corregida que sustituye a <paramref name="existing"/>: mismo tipo de barra, mismo
+    /// anfitrión y misma distribución (número de barras y longitud del conjunto), con el eje de
+    /// <paramref name="fix"/> y el gancho en la columna. NO borra la barra original: lo hace quien
+    /// llama, una vez comprobado que el gancho queda dentro de la columna.
+    /// Devuelve null si no se pudo crear (y lo anota en <see cref="Notes"/>).
+    /// </summary>
+    public Rebar? CreateFixed(BarFix fix, Rebar existing, Element host, bool flipHook = false)
+    {
+        var barType = _doc.GetElement(existing.GetTypeId()) as RebarBarType ?? ClosestBarType(fix.Bar.Diameter);
+        if (barType == null)
+        {
+            Notes.Add($"{fix.Label}: no se encontró el tipo de barra.");
+            return null;
+        }
+
+        var curves = new List<Curve>();
+        for (var i = 0; i + 1 < fix.Centerline.Count; i++)
+        {
+            var a = Units.ToXyz(fix.Centerline[i]);
+            var b = Units.ToXyz(fix.Centerline[i + 1]);
+            if (a.DistanceTo(b) < 1e-4) continue;
+            curves.Add(Line.CreateBound(a, b));
+        }
+        if (curves.Count == 0)
+        {
+            Notes.Add($"{fix.Label}: geometría vacía.");
+            return null;
+        }
+
+        // Normal del plano: la lateral de la viga, con el mismo sentido que la del conjunto original
+        // para que la distribución (lado de la normal) coincida.
+        var normal = Units.ToXyzDirection(fix.PlaneNormal).Normalize();
+        var positions = Math.Max(1, existing.NumberOfBarPositions);
+        var copyLayout = positions <= 1;
+        double arrayLength = 0;
+        var onNormalSide = true;
+        if (positions > 1 && existing.IsRebarShapeDriven())
+        {
+            var acc = existing.GetShapeDrivenAccessor();
+            var en = acc.Normal;
+            if (Math.Abs(en.DotProduct(normal)) > 0.95)
+            {
+                if (en.DotProduct(normal) < 0) normal = -normal;
+                arrayLength = acc.ArrayLength;
+                onNormalSide = acc.BarsOnNormalSide;
+                copyLayout = true;
+            }
+        }
+        if (!copyLayout)
+        {
+            Notes.Add($"{fix.Label}: el conjunto tiene {positions} barras repartidas en una dirección que no es la lateral de la viga; no se corrige automáticamente.");
+            return null;
+        }
+
+        var terminations = new BarTerminationsData(_doc);
+        if (fix.EndHook != null)
+        {
+            var hook = HookByName(HookTypeName) ?? HookType((int)fix.EndHook.Angle);
+            if (hook == null)
+            {
+                Notes.Add($"{fix.Label}: el proyecto no tiene un tipo de gancho de {(int)fix.EndHook.Angle}°; la barra se crea sin gancho. Revisar manualmente.");
+            }
+            else
+            {
+                terminations.HookTypeIdAtEnd = hook.Id;
+                var n = fix.Centerline.Count;
+                var dir = Units.ToXyzDirection((fix.Centerline[n - 1] - fix.Centerline[n - 2]).Normalized());
+                var right = dir.CrossProduct(normal);
+                var hookDir = Units.ToXyzDirection(fix.EndHook.Direction);
+                var orient = hookDir.DotProduct(right) > 0 ? RebarTerminationOrientation.Right : RebarTerminationOrientation.Left;
+                if (flipHook) orient = orient == RebarTerminationOrientation.Left ? RebarTerminationOrientation.Right : RebarTerminationOrientation.Left;
+                terminations.TerminationOrientationAtEnd = orient;
+                var ext = Units.ToMm(hook.GetHookExtensionLength(barType));
+                if (Math.Abs(ext - fix.EndHook.Extension) > 1)
+                    Notes.Add($"{fix.Label}: el gancho '{hook.Name}' tiene extensión {ext:0} mm; la norma pide {fix.EndHook.Extension:0} mm.");
+            }
+        }
+
+        Rebar? rebar;
+        try
+        {
+            rebar = Rebar.CreateFromCurves(_doc, RebarStyle.Standard, barType, host, normal, curves, terminations,
+                useExistingShapeIfPossible: true, createNewShape: true);
+        }
+        catch (Autodesk.Revit.Exceptions.ApplicationException ex)
+        {
+            Notes.Add($"{fix.Label}: Revit no pudo crear la barra corregida ({ex.Message}).");
+            return null;
+        }
+        if (rebar == null)
+        {
+            Notes.Add($"{fix.Label}: Revit no pudo crear la barra corregida (sin forma compatible; cargar familias de formas de armadura).");
+            return null;
+        }
+
+        if (positions > 1 && arrayLength > 1e-9)
+            rebar.GetShapeDrivenAccessor().SetLayoutAsFixedNumber(positions, arrayLength, onNormalSide, includeFirstBar: true, includeLastBar: true);
+
+        var comments = rebar.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
+        if (comments != null && !comments.IsReadOnly)
+            comments.Set($"UnionesAcero: corregida (sustituye a {existing.Id.Value}). {fix.Message}");
 
         return rebar;
     }

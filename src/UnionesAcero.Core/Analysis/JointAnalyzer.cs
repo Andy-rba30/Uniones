@@ -338,7 +338,11 @@ public sealed class JointAnalyzer
         };
     }
 
-    private static Vec3 HookDirection(ColumnSection column, BeamSection beam, BarLayer layer, double z, double hookExtension, out Diagnostic? warning)
+    /// <summary>
+    /// Sentido del gancho de 90°: superiores hacia abajo; inferiores hacia arriba salvo que la
+    /// columna termine en la viga (nudo de cubierta), en cuyo caso también hacia abajo.
+    /// </summary>
+    public static Vec3 HookDirection(ColumnSection column, BeamSection beam, BarLayer layer, double z, double hookExtension, out Diagnostic? warning)
     {
         warning = null;
         // Superiores: gancho hacia abajo. Inferiores: hacia arriba (si la columna continúa).

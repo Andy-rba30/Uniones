@@ -130,9 +130,22 @@ public sealed class PlanPreview : Canvas
             var p0 = j.ContactPoint; var p1 = j.ContactPoint - u * len;
             return (p0 + v * (s.Width / 2), p1 + v * (s.Width / 2), p1 - v * (s.Width / 2), p0 - v * (s.Width / 2));
         }
-        var dir = (s.AxisEnd - s.AxisStart).Normalized();
+        // No conectada: se dibuja solo un tramo desde el extremo más cercano a la columna, para que
+        // una viga larga (o lejana) no encoja el dibujo.
+        var axis = s.AxisEnd - s.AxisStart;
+        var axisLen = axis.Length;
+        if (axisLen < 1 || _item?.Section == null) return null;
+        var dir = axis / axisLen;
         var vv = dir.Perp();
-        return (s.AxisStart + vv * (s.Width / 2), s.AxisEnd + vv * (s.Width / 2), s.AxisEnd - vv * (s.Width / 2), s.AxisStart - vv * (s.Width / 2));
+        var outline = _item.Section.Outline;
+        var (cmin, cmax) = outline.Bounds;
+        var maxLen = Math.Min(axisLen, Math.Max(500, 1.5 * Math.Max(cmax.X - cmin.X, cmax.Y - cmin.Y)));
+        var dS = outline.DistanceToBoundary(s.AxisStart);
+        var dE = outline.DistanceToBoundary(s.AxisEnd);
+        Vec2 near, far;
+        if (dS <= dE) { near = s.AxisStart; far = s.AxisStart + dir * maxLen; }
+        else { near = s.AxisEnd; far = s.AxisEnd - dir * maxLen; }
+        return (near + vv * (s.Width / 2), far + vv * (s.Width / 2), far - vv * (s.Width / 2), near - vv * (s.Width / 2));
     }
 
     private double BeamDrawLength(BeamJoint j)
@@ -198,13 +211,15 @@ public sealed class PlanPreview : Canvas
                 Stroke = selected ? PreviewColors.Selected : (connected ? PreviewColors.Edge : PreviewColors.Insufficient),
                 StrokeThickness = selected ? 2.4 : 1.2,
                 StrokeDashArray = connected ? null : new DoubleCollection { 4, 3 },
-                ToolTip = b.Name + ": " + b.Base.Width.ToString("0") + " x " + b.Base.Depth.ToString("0") + " mm" +
-                          (connected ? $", profundidad disponible {b.Joint!.AvailableDepth:0} mm (útil {b.Joint.UsableDepth:0})" : " (no conectada)")
+                ToolTip = b.Name + ": " + b.Base.Width.ToString("0") + " x " + b.Base.Depth.ToString("0") + " mm; barras en el modelo: " + b.ModelBarsText +
+                          (connected ? $"; profundidad disponible {b.Joint!.AvailableDepth:0} mm (útil {b.Joint.UsableDepth:0})"
+                                     : "; NO CONECTADA: " + (b.Joint?.Diagnostics.FirstOrDefault()?.Message ?? "excluida o sin análisis"))
             };
             foreach (var p in new[] { r.A, r.B, r.C, r.D }) poly.Points.Add(P(p));
             Children.Add(poly);
             var mid = (r.B + r.C) / 2;
-            var lbl = Text(b.Name, X(mid.X) - 4 * b.Name.Length, Y(mid.Y) - 8, selected ? PreviewColors.Selected : PreviewColors.Dim, 11, true);
+            var caption = connected ? b.Name : b.Name + " (no conectada)";
+            var lbl = Text(caption, X(mid.X) - 3.2 * caption.Length, Y(mid.Y) - 8, selected ? PreviewColors.Selected : (connected ? PreviewColors.Dim : PreviewColors.Insufficient), 11, true);
             lbl.IsHitTestVisible = false;
         }
 
@@ -229,36 +244,76 @@ public sealed class PlanPreview : Canvas
         Text(Mm(cmax.X - cmin.X) + " mm", X((cmin.X + cmax.X) / 2) - 22, Y(cmin.Y) + 4, PreviewColors.Dim, 10);
         Text(Mm(cmax.Y - cmin.Y) + " mm", X(cmax.X) + 4, Y((cmin.Y + cmax.Y) / 2) - 7, PreviewColors.Dim, 10);
 
-        // barras existentes (a trazos)
+        // barras existentes (a trazos): verde cumple, rojo no cumple, gris si se va a corregir (dibujada encima en naranja)
         foreach (var b in _item.Beams)
         {
+            var fixedIds = b.Plans.SelectMany(p => p.Fixes).Select(f => f.Bar.Id).ToHashSet();
             foreach (var (_, bar) in b.ExistingBars)
             {
                 var check = b.Checks.FirstOrDefault(c => c.Id == bar.Id);
                 if (check == null || check.Status == CheckStatus.NotApplicable) continue;
-                var brush = check.Status == CheckStatus.Ok ? PreviewColors.ExistingOk : PreviewColors.ExistingFail;
+                var willFix = fixedIds.Contains(bar.Id);
+                var brush = willFix ? PreviewColors.Existing : check.Status == CheckStatus.Ok ? PreviewColors.ExistingOk : PreviewColors.ExistingFail;
+                var tip = $"Barra existente {bar.Id} ({bar.Count}Ø{bar.Diameter:0}, {b.Name}): {check.Message}" + (willFix ? " → se corrige (ver barra naranja)" : "");
                 for (var i = 0; i + 1 < bar.Centerline.Count; i++)
                 {
                     var a = bar.Centerline[i]; var c = bar.Centerline[i + 1];
                     if (Math.Abs(c.Z - a.Z) > 0.5 * a.DistanceTo(c)) continue; // tramo vertical (gancho): se omite en planta
                     Children.Add(new Line
                     {
-                        X1 = X(a.X), Y1 = Y(a.Y), X2 = X(c.X), Y2 = Y(c.Y), Stroke = brush, StrokeThickness = 1.3,
-                        StrokeDashArray = new DoubleCollection { 5, 3 }, ToolTip = "Barra existente " + bar.Id + ": " + check.Message
+                        X1 = X(a.X), Y1 = Y(a.Y), X2 = X(c.X), Y2 = Y(c.Y), Stroke = brush, StrokeThickness = willFix ? 1.2 : 1.6,
+                        StrokeDashArray = new DoubleCollection { 5, 3 }, ToolTip = tip
                     });
+                }
+                if (check.Status == CheckStatus.Fail && !willFix)
+                {
+                    var end = bar.Centerline[^1];
+                    Text("✖", X(end.X) + 4, Y(end.Y) - 10, PreviewColors.Insufficient, 14, true);
+                }
+            }
+
+            // correcciones: la barra existente prolongada hasta el núcleo (naranja, con el punto del gancho)
+            foreach (var plan in b.Plans)
+            {
+                foreach (var (_, bar, fix) in plan.Fixes)
+                {
+                    var th = Math.Max(1.8, bar.Diameter * _k);
+                    var tip = $"Corregida {fix.Label}: {fix.Message}";
+                    for (var i = 0; i + 1 < fix.Centerline.Count; i++)
+                    {
+                        var a = fix.Centerline[i]; var c = fix.Centerline[i + 1];
+                        if (Math.Abs(c.Z - a.Z) > 0.5 * a.DistanceTo(c)) continue;
+                        Children.Add(new Line
+                        {
+                            X1 = X(a.X), Y1 = Y(a.Y), X2 = X(c.X), Y2 = Y(c.Y), Stroke = PreviewColors.Fixed, StrokeThickness = th,
+                            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, ToolTip = tip
+                        });
+                    }
+                    if (fix.EndHook != null)
+                    {
+                        var end = fix.Centerline[^1];
+                        var rr = Math.Max(3, 0.9 * bar.Diameter * _k);
+                        var dot = new Ellipse { Width = 2 * rr, Height = 2 * rr, Fill = PreviewColors.Fixed, Stroke = Brushes.Black, StrokeThickness = 0.6, ToolTip = tip };
+                        SetLeft(dot, X(end.X) - rr); SetTop(dot, Y(end.Y) - rr);
+                        Children.Add(dot);
+                    }
                 }
             }
         }
 
-        // barras nuevas
+        // barras nuevas (solo en las capas sin barras existentes, o si se eligió añadir barras igualmente)
         if (_item.Analysis != null)
         {
             foreach (var j in _item.Analysis.Joints)
             {
+                var beamItem = _item.Beams.FirstOrDefault(b => b.Base.SourceId == j.Beam.SourceId);
                 foreach (var l in j.Layers)
                 {
                     var g = l.Group;
                     if (g == null) continue;
+                    var plan = beamItem?.Plan(l.Layer);
+                    if (plan != null && plan.Action is not (LayerAction.CreateNew or LayerAction.Insufficient)) continue;
+                    if (plan is { Action: LayerAction.Insufficient } && plan.Unfixable.Count > 0) continue;
                     var brush = PreviewColors.ForGroup(g);
                     var th = Math.Max(1.6, g.Diameter * _k);
                     var dash = g.Layer == BarLayer.Bottom ? new DoubleCollection { 6, 2 } : null;
@@ -303,15 +358,14 @@ public sealed class PlanPreview : Canvas
             }
         }
 
-        // resumen
+        // resumen y orientación
         if (_item.Analysis != null)
         {
-            var groups = _item.Analysis.BarGroups.ToList();
-            var bad = groups.Count(g => g.Decision == AnchorageDecision.Insufficient);
-            var summary = $"{groups.Count} grupo(s) de barras" + (bad > 0 ? $", {bad} insuficiente(s)" : "") +
-                          $" · {_item.Analysis.Options.Code.Name}" + (_item.Analysis.Options.SeismicJoint ? " (sísmico)" : "");
+            var summary = _item.PlanSummary() + $" · {_item.Analysis.Options.Code.Name}" + (_item.Analysis.Options.SeismicJoint ? " (sísmico)" : "");
             Text(summary, 8, H - 20, PreviewColors.Dim, 11);
         }
+        Text("X →", W - 44, H - 20, PreviewColors.Dim, 10);
+        Text("Y ↑", W - 44, H - 34, PreviewColors.Dim, 10);
     }
 
     private TextBlock Text(string s, double x, double y, Brush brush, double size, bool bold = false)

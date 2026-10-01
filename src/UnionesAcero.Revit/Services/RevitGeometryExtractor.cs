@@ -6,6 +6,18 @@ using UnionesAcero.Revit.Settings;
 
 namespace UnionesAcero.Revit.Services;
 
+/// <summary>Armadura ya modelada en una columna (informativa y para el núcleo confinado).</summary>
+public sealed record ColumnRebarInfo(int LongitudinalCount, double LongitudinalDb, double TieDb, int RebarSets)
+{
+    public string Describe()
+    {
+        var parts = new List<string>();
+        if (LongitudinalCount > 0) parts.Add($"{LongitudinalCount}Ø{LongitudinalDb:0}");
+        if (TieDb > 0) parts.Add($"estribos Ø{TieDb:0}");
+        return parts.Count == 0 ? $"{RebarSets} conjunto(s) de barras" : string.Join(" + ", parts);
+    }
+}
+
 /// <summary>
 /// Lee del modelo de Revit la sección de la columna (cualquier forma) y las vigas que llegan a ella,
 /// y los traduce al modelo del núcleo (mm).
@@ -25,8 +37,12 @@ public sealed class RevitGeometryExtractor
 
     // ------------------------------------------------------------------ Columna
 
-    public ColumnSection ExtractColumn(FamilyInstance column)
+    public ColumnSection ExtractColumn(FamilyInstance column) => ExtractColumn(column, out _);
+
+    /// <param name="modelRebar">Armadura ya modelada en la columna (null si no tiene).</param>
+    public ColumnSection ExtractColumn(FamilyInstance column, out ColumnRebarInfo? modelRebar)
     {
+        modelRebar = InferColumnBars(column);
         var solid = LargestSolid(column) ?? throw new InvalidOperationException("La columna no tiene geometría sólida.");
         var outline = HorizontalSectionOutline(solid) ?? throw new InvalidOperationException(
             "No se encontró una cara horizontal en la columna para obtener su sección. Las columnas inclinadas no están soportadas.");
@@ -39,7 +55,8 @@ public sealed class RevitGeometryExtractor
         return new ColumnSection(ElementLabel(column), outline)
         {
             Cover = cover,
-            TieDiameter = _settings.ColumnTieDiameterMm,
+            TieDiameter = modelRebar is { TieDb: > 0 } mr ? mr.TieDb : _settings.ColumnTieDiameterMm,
+            LongitudinalBarDiameter = modelRebar is { LongitudinalDb: > 0 } ml ? ml.LongitudinalDb : 16,
             TopElevation = zMax,
             BottomElevation = zMin,
             SourceId = column.Id.Value
@@ -78,6 +95,50 @@ public sealed class RevitGeometryExtractor
             if (area > outerArea) { outerArea = area; outer = pts; }
         }
         return outer == null ? null : new Polygon2D(outer);
+    }
+
+    /// <summary>
+    /// Armadura existente de la columna: barras verticales (longitudinales) y estribos. Se usa el
+    /// diámetro del estribo para el núcleo confinado y se informa del resto.
+    /// </summary>
+    private ColumnRebarInfo? InferColumnBars(FamilyInstance column)
+    {
+        RebarHostData? host;
+        try { host = RebarHostData.GetRebarHostData(column); }
+        catch { return null; }
+        if (host == null) return null;
+
+        var sets = 0;
+        var longCount = 0;
+        double longDb = 0, tieDb = 0;
+        foreach (var rebar in host.GetRebarsInHost())
+        {
+            sets++;
+            if (_doc.GetElement(rebar.GetTypeId()) is not RebarBarType bt) continue;
+            var db = Units.ToMm(bt.BarNominalDiameter);
+            var isTie = _doc.GetElement(rebar.GetShapeId()) is RebarShape shape && shape.RebarStyle == RebarStyle.StirrupTie;
+            if (!isTie)
+            {
+                IList<Curve> curves;
+                try { curves = rebar.GetCenterlineCurves(false, true, true, MultiplanarOption.IncludeOnlyPlanarCurves, 0); }
+                catch { continue; }
+                var main = curves.OfType<Line>().OrderByDescending(l => l.Length).FirstOrDefault();
+                if (main == null) continue;
+                if (Math.Abs(main.Direction.Z) > 0.95)
+                {
+                    longCount += Math.Max(1, rebar.NumberOfBarPositions);
+                    longDb = Math.Max(longDb, db);
+                    continue;
+                }
+                // Horizontal con estilo estándar: estribo abierto, grapa o barra de cosido.
+                isTie = Math.Abs(main.Direction.Z) < 0.1;
+            }
+            if (isTie) tieDb = Math.Max(tieDb, db);
+        }
+        if (sets == 0) return null;
+        var info = new ColumnRebarInfo(longCount, longDb, tieDb, sets);
+        Notes.Add($"{ElementLabel(column)}: armadura en el modelo: {info.Describe()}.");
+        return info;
     }
 
     private static double ShoelaceArea(List<Vec2> pts)
@@ -215,9 +276,19 @@ public sealed class RevitGeometryExtractor
         GeometryElement? geometry = null;
         // Si el elemento está unido a otros (vigas, losas) la geometría visible tiene recortes; la
         // original de la familia es la sección completa, que es la que atraviesan las barras.
+        // OJO: GetOriginalGeometry devuelve la geometría en el sistema de coordenadas de la FAMILIA
+        // (sin la posición ni el giro de la instancia); hay que transformarla al proyecto.
         if (element is FamilyInstance fi)
         {
-            try { geometry = fi.GetOriginalGeometry(options); } catch { geometry = null; }
+            try
+            {
+                var original = fi.GetOriginalGeometry(options);
+                geometry = original?.GetTransformed(fi.GetTransform());
+            }
+            catch
+            {
+                geometry = null;
+            }
         }
         geometry ??= element.get_Geometry(options);
         if (geometry == null) return null;

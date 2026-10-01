@@ -7,6 +7,17 @@ using UnionesAcero.Core.Model;
 
 namespace UnionesAcero.Revit.Settings;
 
+/// <summary>Qué hacer con las vigas que ya tienen barras longitudinales modeladas.</summary>
+public enum ExistingBarsAction
+{
+    /// <summary>Verificarlas y corregir las que no cumplen (misma barra prolongada hasta el núcleo, con gancho si hace falta).</summary>
+    Fix,
+    /// <summary>Solo verificarlas; no se crea ni se modifica nada en esas capas.</summary>
+    VerifyOnly,
+    /// <summary>Ignorarlas y añadir barras nuevas como si la viga no tuviera armadura.</summary>
+    AddNew
+}
+
 /// <summary>
 /// Valores por defecto de la ventana (config.json junto a la DLL, como en los add-ins de columnas
 /// y muros). Lo que se cambia en la ventana vale solo para esa vez salvo que se pulse
@@ -40,6 +51,27 @@ public sealed class PluginSettings
 
     /// <summary>Si la viga ya tiene barras longitudinales modeladas, proponer su diámetro y cantidad.</summary>
     public bool InferBarsFromModel { get; set; } = true;
+
+    /// <summary>
+    /// Vigas con barras longitudinales ya modeladas: "fix" (verificar y corregir las que no cumplen),
+    /// "verify" (solo verificar) o "add" (ignorarlas y añadir barras nuevas).
+    /// </summary>
+    public string ExistingBarsMode { get; set; } = "fix";
+
+    [JsonIgnore]
+    public ExistingBarsAction ExistingBarsAction => (ExistingBarsMode ?? "").Trim().ToLowerInvariant() switch
+    {
+        "verify" or "verificar" => ExistingBarsAction.VerifyOnly,
+        "add" or "new" or "nuevas" => ExistingBarsAction.AddNew,
+        _ => ExistingBarsAction.Fix
+    };
+
+    public static string ModeKey(ExistingBarsAction a) => a switch
+    {
+        ExistingBarsAction.VerifyOnly => "verify",
+        ExistingBarsAction.AddNew => "add",
+        _ => "fix"
+    };
 
     public bool EmbedToFarFace { get; set; } = true;
     public bool AutoStaggerCrossingLayers { get; set; } = true;
@@ -94,6 +126,7 @@ public sealed class PluginSettings
     public PluginSettings Normalized()
     {
         TopBarTypeName ??= ""; BottomBarTypeName ??= ""; HookTypeName ??= "";
+        ExistingBarsMode = ModeKey(ExistingBarsAction);
         if (TopBarCount < 1) TopBarCount = 1;
         if (BottomBarCount < 1) BottomBarCount = 1;
         if (LengthRoundingMm < 0) LengthRoundingMm = 0;

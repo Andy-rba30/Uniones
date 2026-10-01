@@ -17,15 +17,19 @@ public static class PreviewColors
     public static readonly Brush Insufficient = Freeze(Color.FromRgb(0xE0, 0x1B, 0x1B));
     public static readonly Brush ExistingOk = Freeze(Color.FromRgb(0x3F, 0x9C, 0x5A));
     public static readonly Brush ExistingFail = Freeze(Color.FromRgb(0xE0, 0x1B, 0x1B));
-    public static readonly Brush Existing = Freeze(Color.FromRgb(0x7A, 0x7A, 0x7A));
+    public static readonly Brush Existing = Freeze(Color.FromRgb(0x9A, 0x9A, 0x9A));
+    /// <summary>Barra corregida (sustituye a una existente que no cumple).</summary>
+    public static readonly Brush Fixed = Freeze(Color.FromRgb(0xC8, 0x7A, 0x00));
     public static readonly Brush Selected = Freeze(Color.FromRgb(0x2F, 0x7B, 0xD9));
     public static readonly Brush Dim = Freeze(Color.FromRgb(0x50, 0x50, 0x50));
 
-    public static Brush ForGroup(BarGroup g)
+    public static Brush ForGroup(BarGroup g) => ForDecision(g.Decision, g.Layer);
+
+    public static Brush ForDecision(AnchorageDecision d, BarLayer layer)
     {
-        if (g.Decision == AnchorageDecision.Insufficient) return Insufficient;
-        if (g.Decision == AnchorageDecision.PassThrough) return PassThrough;
-        return g.Layer == BarLayer.Top ? TopBar : BottomBar;
+        if (d == AnchorageDecision.Insufficient) return Insufficient;
+        if (d == AnchorageDecision.PassThrough) return PassThrough;
+        return layer == BarLayer.Top ? TopBar : BottomBar;
     }
 
     private static Brush Freeze(Color c)

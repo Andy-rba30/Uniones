@@ -31,7 +31,7 @@ public sealed class JointWindow : Window
     /// <summary>Configuración final si el usuario pulsó "Armar"; null si canceló.</summary>
     public PluginSettings? Result { get; private set; }
 
-    private ComboBox _code = null!, _topType = null!, _botType = null!, _hook = null!;
+    private ComboBox _code = null!, _topType = null!, _botType = null!, _hook = null!, _mode = null!;
     private TextBox _fy = null!, _fc = null!, _topN = null!, _botN = null!;
     private CheckBox _seismic = null!, _light = null!, _epoxy = null!, _infer = null!, _embedFar = null!, _stagger = null!, _highlight = null!;
     private TextBox _colCover = null!, _colTie = null!, _beamCover = null!, _beamStirrup = null!, _extension = null!, _clearance = null!, _rounding = null!;
@@ -121,6 +121,15 @@ public sealed class JointWindow : Window
     {
         var ok = _items.Count(i => i.CanBuild);
         var group = new GroupBox { Header = $"Columnas seleccionadas: {_items.Count} ({ok} con vigas). Haz clic en una para ver su nudo.", Padding = new Thickness(4) };
+        var outer = new StackPanel();
+        outer.Children.Add(new TextBlock
+        {
+            Text = "Cómo funciona: 1) se lee la sección de la columna, las vigas que llegan y las barras ya modeladas (columna y vigas); " +
+                   "2) para cada capa de cada viga se calcula el anclaje que cabe en la columna (recto, gancho a 90° o pasante) según la norma; " +
+                   "3) vigas sin barras: se proponen barras nuevas; vigas con barras: se verifican y las que no cumplen se corrigen " +
+                   "(misma barra, prolongada hasta el núcleo con gancho). Nada cambia en el modelo hasta pulsar Armar.",
+            Foreground = RevitTheme.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 0, 4, 6)
+        });
         var panel = new StackPanel();
         foreach (var item in _items)
         {
@@ -141,7 +150,8 @@ public sealed class JointWindow : Window
             _itemRows[item] = border;
             panel.Children.Add(border);
         }
-        group.Content = new ScrollViewer { Content = panel, MaxHeight = 120, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        outer.Children.Add(new ScrollViewer { Content = panel, MaxHeight = 110, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        group.Content = outer;
         return group;
     }
 
@@ -185,13 +195,13 @@ public sealed class JointWindow : Window
                     _beamsCaption.Text = "Selecciona una columna con vigas en la lista.";
                     return;
                 }
-                _beamsCaption.Text = "Por viga: tipo y número de barras de cada capa (vacío / 0 = valores generales). Clic en el nombre para ver su alzado.";
+                _beamsCaption.Text = "Por viga: resultado de cada capa. Tipo y número de barras solo se usan para las capas SIN barras modeladas (vacío / 0 = valores generales). Clic en el nombre para ver su alzado.";
                 foreach (var w in new[] { 24.0, 110, 150, 42, 150, 42 })
                     _beamsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w) });
                 _beamsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
                 _beamsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                var headers = new[] { "", "Viga", "Superiores", "n", "Inferiores", "n", "Anclaje sup. / inf." };
+                var headers = new[] { "", "Viga", "Superiores", "n", "Inferiores", "n", "Resultado sup. / inf." };
                 for (var c = 0; c < headers.Length; c++)
                 {
                     var tb = new TextBlock { Text = headers[c], Foreground = RevitTheme.Muted, Margin = Pad };
@@ -209,7 +219,8 @@ public sealed class JointWindow : Window
                     include.Unchecked += (_, _) => { captured.Include = false; Refresh(); };
                     Place(include, row, 0);
 
-                    var name = new TextBlock { Text = b.Name, Margin = Pad, VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Hand, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = $"{b.Name}: {b.Base.Width:0} x {b.Base.Depth:0} mm" + (b.ModelBars.HasValue ? $"; en el modelo: sup. {b.ModelBars.Value.TopN}Ø{b.ModelBars.Value.TopDb:0}, inf. {b.ModelBars.Value.BottomN}Ø{b.ModelBars.Value.BottomDb:0}" : "") };
+                    var name = new TextBlock { Text = b.Name, Margin = Pad, VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Hand, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = $"{b.Name}: {b.Base.Width:0} x {b.Base.Depth:0} mm; barras en el modelo: {b.ModelBarsText}" };
+                    if (b.ModelBars.HasValue) name.Foreground = RevitTheme.Text; else name.Foreground = RevitTheme.Muted;
                     name.MouseLeftButtonDown += (_, _) => { _selectedBeam = captured; Refresh(); };
                     Place(name, row, 1);
 
@@ -245,11 +256,19 @@ public sealed class JointWindow : Window
             }
             if (item != null)
             {
+                var sets = item.Beams.Sum(b => b.ExistingBars.Count);
                 var existing = item.Beams.Sum(b => b.Checks.Count(c => c.Status != CheckStatus.NotApplicable));
                 var failing = item.Beams.Sum(b => b.Checks.Count(c => c.Status == CheckStatus.Fail));
-                _existingText.Text = existing == 0 ? "Las vigas no tienen barras longitudinales modeladas que verificar."
-                    : $"Barras ya modeladas: {existing} revisadas, {failing} no cumplen (a trazos en los esquemas: verde cumple, rojo no).";
-                _existingText.Foreground = failing > 0 ? RevitTheme.Error : RevitTheme.Muted;
+                var fixes = item.FixCount;
+                if (sets == 0)
+                    _existingText.Text = "Las vigas no tienen barras longitudinales modeladas: se proponen barras nuevas.";
+                else if (existing == 0)
+                    _existingText.Text = $"Las vigas tienen {sets} conjunto(s) de barras, pero ninguno es una barra longitudinal que llegue a esta columna (o la viga no está conectada).";
+                else
+                    _existingText.Text = $"Barras ya modeladas: {existing} conjunto(s) revisados, {failing} no cumplen" +
+                                         (fixes > 0 ? $", {fixes} se corregirán al armar" : "") +
+                                         ". En los esquemas: a trazos verde = cumple, a trazos rojo = no cumple, naranja = corregida.";
+                _existingText.Foreground = failing > 0 && fixes < failing ? RevitTheme.Error : failing > 0 ? RevitTheme.Warn : RevitTheme.Muted;
             }
         }
         finally { _refreshingBeams = false; }
@@ -267,15 +286,75 @@ public sealed class JointWindow : Window
             text.Foreground = RevitTheme.Error;
             return;
         }
-        var l = j.Layers.FirstOrDefault(x => x.Layer == layer);
-        if (l == null) { text.Text = prefix + "—"; return; }
-        var g = l.Group;
-        var bars = g != null ? $"{g.Count}Ø{g.Diameter:0} " : "";
-        var detail = l.Decision == AnchorageDecision.PassThrough
+        var p = b.Plan(layer);
+        var l = p?.Result;
+        if (p == null || l == null) { text.Text = prefix + "—"; text.Foreground = RevitTheme.Hint; return; }
+
+        string Req(AnchorageDecision d, double req, double prov) => d == AnchorageDecision.PassThrough
             ? $"pasante (h = {j.AvailableDepth:0})"
-            : $"{JointAnalyzer.DecisionName(l.Decision)} (req. {(l.Decision == AnchorageDecision.Straight ? l.StraightRequired : l.HookRequired):0} / prov. {l.Provided:0})";
-        text.Text = prefix + bars + detail;
-        text.Foreground = l.Ok ? RevitTheme.Ok : RevitTheme.Error;
+            : $"{JointAnalyzer.DecisionName(d)} (req. {req:0} / prov. {prov:0})";
+        var newReq = l.Decision == AnchorageDecision.Straight ? l.StraightRequired : l.HookRequired;
+
+        switch (p.Action)
+        {
+            case LayerAction.CreateNew:
+            {
+                var g = p.NewGroup;
+                var bars = g != null ? $"{g.Count}Ø{g.Diameter:0} " : "";
+                text.Text = prefix + "NUEVAS " + bars + Req(l.Decision, newReq, l.Provided);
+                text.Foreground = RevitTheme.Ok;
+                break;
+            }
+            case LayerAction.KeepExisting:
+                text.Text = prefix + "existentes " + ExistingBars(b, p) + " cumplen: " + Short(p.Existing.FirstOrDefault()?.Message);
+                text.Foreground = RevitTheme.Ok;
+                break;
+            case LayerAction.FixExisting:
+            {
+                var f = p.Fixes[0].Fix;
+                text.Text = prefix + "existentes " + ExistingBars(b, p) + " NO cumplen → corregir: " + Req(f.Decision, f.RequiredLength, f.ProvidedLength) +
+                            (p.Fixes.Count > 1 ? $" ({p.Fixes.Count} conjuntos)" : "") +
+                            (p.Unfixable.Count > 0 ? $"; {p.Unfixable.Count} sin corrección posible" : "") +
+                            (p.ExistingOk > 0 ? $"; {p.ExistingOk} ya cumplen" : "");
+                text.Foreground = p.Unfixable.Count == 0 ? RevitTheme.Warn : RevitTheme.Error;
+                break;
+            }
+            case LayerAction.VerifyOnly:
+                text.Text = prefix + "existentes " + ExistingBars(b, p) + (p.ExistingFail > 0
+                    ? $": {p.ExistingFail} NO cumplen (solo verificación): " + Short(p.Existing.FirstOrDefault(c => c.Status == CheckStatus.Fail)?.Message)
+                    : " cumplen: " + Short(p.Existing.FirstOrDefault()?.Message));
+                text.Foreground = p.ExistingFail > 0 ? RevitTheme.Error : RevitTheme.Ok;
+                break;
+            case LayerAction.Insufficient:
+                text.Text = prefix + (p.Unfixable.Count > 0
+                    ? "existentes NO cumplen y no hay corrección: " + Short(p.Unfixable[0].Reason)
+                    : "INSUFICIENTE: " + Req(l.Decision, newReq, l.Provided));
+                text.Foreground = RevitTheme.Error;
+                break;
+            default:
+                text.Text = prefix + "—";
+                text.Foreground = RevitTheme.Hint;
+                break;
+        }
+        text.ToolTip = string.Join(Environment.NewLine,
+            p.Existing.Select(c => $"[{c.Id}] {c.Message}")
+             .Concat(p.Unfixable.Select(u => $"[{u.Bar.Id}] sin corrección: {u.Reason}"))
+             .Concat(p.Fixes.Select(f => $"[{f.Bar.Id}] {f.Fix.Message}"))
+             .DefaultIfEmpty(l.Formula));
+    }
+
+    private static string ExistingBars(BeamItem b, LayerPlan p)
+    {
+        var parts = p.Existing.Select(c => b.ExistingBars.FirstOrDefault(e => e.Bar.Id == c.Id).Bar)
+            .Where(bar => bar != null).Select(bar => $"{bar!.Count}Ø{bar.Diameter:0}").ToList();
+        return parts.Count == 0 ? "" : string.Join("+", parts);
+    }
+
+    private static string Short(string? msg)
+    {
+        if (string.IsNullOrEmpty(msg)) return "";
+        var dot = msg.IndexOf(". ", StringComparison.Ordinal);
+        return dot > 0 ? msg[..dot] : msg.TrimEnd('.');
     }
 
     private void Place(FrameworkElement e, int row, int col)
@@ -330,8 +409,16 @@ public sealed class JointWindow : Window
         Hook(_botType);
         Hook(_botN);
         AddRow(grid, r++, "Capa inferior:", botRow, "Tipo de barra y número de barras de la capa inferior.");
-        _infer = new CheckBox { Content = "Si la viga ya tiene barras modeladas, proponer su diámetro y cantidad", IsChecked = _cfg.InferBarsFromModel, Margin = Pad };
+        _infer = new CheckBox { Content = "Si la viga ya tiene barras modeladas, proponer su diámetro y cantidad para las barras nuevas", IsChecked = _cfg.InferBarsFromModel, Margin = Pad };
         AddRow(grid, r++, "", _infer, "Solo cuando no se ha elegido nada arriba ni en la tabla de vigas.");
+        _mode = new ComboBox { Margin = Pad };
+        _mode.Items.Add("Verificarlas y corregir las que no cumplen (recomendado)");
+        _mode.Items.Add("Solo verificarlas, sin modificar nada");
+        _mode.Items.Add("Ignorarlas y añadir barras nuevas");
+        _mode.SelectedIndex = _cfg.ExistingBarsAction switch { ExistingBarsAction.VerifyOnly => 1, ExistingBarsAction.AddNew => 2, _ => 0 };
+        AddRow(grid, r++, "Vigas con barras modeladas:", _mode,
+            "Corregir = cada conjunto de barras longitudinales que no cumple el anclaje se sustituye por la misma barra (mismo tipo, mismo número, misma posición) " +
+            "cortada en la columna y prolongada hasta el núcleo, con gancho a 90° si el anclaje recto no cabe. Las que cumplen no se tocan y no se añaden barras nuevas en esa capa.");
         _hook = new ComboBox { Margin = Pad };
         foreach (var h in _hookTypes) _hook.Items.Add(HookDisplay(h));
         var hookMatch = MatchName(_hookTypes, _cfg.HookTypeName);
@@ -376,18 +463,19 @@ public sealed class JointWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1.25, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
-        var planGroup = new GroupBox { Header = "Planta del nudo (rueda: zoom, arrastrar: mover, doble clic: encajar, clic en una viga: su alzado)", Padding = new Thickness(4) };
+        var planGroup = new GroupBox { Header = "Planta del nudo, vista desde arriba (rueda: zoom, arrastrar: mover, doble clic: encajar, clic en una viga: su alzado)", Padding = new Thickness(4) };
         var planPanel = new DockPanel();
         _previewCaption = new TextBlock { Foreground = RevitTheme.Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4) };
         DockPanel.SetDock(_previewCaption, Dock.Top);
         planPanel.Children.Add(_previewCaption);
         var legend = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
-        LegendItem(legend, PreviewColors.TopBar, "capa superior");
-        LegendItem(legend, PreviewColors.BottomBar, "capa inferior (a trazos)");
+        LegendItem(legend, PreviewColors.TopBar, "nueva, capa superior");
+        LegendItem(legend, PreviewColors.BottomBar, "nueva, capa inferior (a trazos)");
         LegendItem(legend, PreviewColors.PassThrough, "pasante");
-        LegendItem(legend, PreviewColors.Insufficient, "insuficiente");
-        LegendItem(legend, PreviewColors.ExistingOk, "existente cumple");
-        LegendItem(legend, PreviewColors.ExistingFail, "existente no cumple");
+        LegendItem(legend, PreviewColors.Insufficient, "insuficiente ✖");
+        LegendItem(legend, PreviewColors.ExistingOk, "existente cumple (a trazos)");
+        LegendItem(legend, PreviewColors.ExistingFail, "existente no cumple (a trazos)");
+        LegendItem(legend, PreviewColors.Fixed, "corregida");
         legend.Children.Add(new TextBlock { Text = "● = gancho a 90° (vertical)", Margin = new Thickness(0, 0, 12, 0) });
         DockPanel.SetDock(legend, Dock.Bottom);
         planPanel.Children.Add(legend);
@@ -398,7 +486,7 @@ public sealed class JointWindow : Window
         Grid.SetRow(planGroup, 0);
         grid.Children.Add(planGroup);
 
-        var elvGroup = new GroupBox { Header = "Alzado de la viga seleccionada", Padding = new Thickness(4), Margin = new Thickness(0, 6, 0, 0) };
+        var elvGroup = new GroupBox { Header = "Alzado de la viga seleccionada (corte por su eje: la viga a la izquierda entra en la columna por la derecha)", Padding = new Thickness(4), Margin = new Thickness(0, 6, 0, 0) };
         _elevation = new ElevationPreview { MinHeight = 160 };
         elvGroup.Content = new Border { BorderBrush = RevitTheme.Border, BorderThickness = new Thickness(1), Child = _elevation };
         Grid.SetRow(elvGroup, 1);
@@ -525,6 +613,7 @@ public sealed class JointWindow : Window
         c.TopBarCount = (int)ReadNum(_topN, "barras superiores", 1, errors);
         c.BottomBarCount = (int)ReadNum(_botN, "barras inferiores", 1, errors);
         c.InferBarsFromModel = _infer.IsChecked == true;
+        c.ExistingBarsMode = PluginSettings.ModeKey(_mode.SelectedIndex switch { 1 => ExistingBarsAction.VerifyOnly, 2 => ExistingBarsAction.AddNew, _ => ExistingBarsAction.Fix });
         c.HookTypeName = _hook.SelectedIndex >= 0 ? _hookTypes[_hook.SelectedIndex] : "";
         c.ColumnCoverMm = ReadNum(_colCover, "recubrimiento de columna", 0, errors);
         c.ColumnTieDiameterMm = ReadNum(_colTie, "estribo de columna", 0, errors);
@@ -562,33 +651,35 @@ public sealed class JointWindow : Window
 
         var buildable = 0;
         var insufficient = 0;
+        var fixes = 0;
         foreach (var item in _items)
         {
             if (!item.CanBuild) continue;
             var analysis = JointSession.Recompute(item, scratch, DiameterOf);
-            var groups = analysis?.BarGroups.ToList() ?? new List<BarGroup>();
-            var okGroups = groups.Count(g => g.Decision != AnchorageDecision.Insufficient);
-            var bad = groups.Count - okGroups;
-            insufficient += bad;
-            if (okGroups > 0) buildable++;
+            insufficient += item.InsufficientCount;
+            fixes += item.FixCount;
+            if (item.HasWork) buildable++;
             if (_itemRuns.TryGetValue(item, out var runs))
             {
                 var errors = analysis?.AllDiagnostics.Count(d => d.Severity == Severity.Error) ?? 0;
-                runs.Kind.Foreground = errors == 0 ? RevitTheme.Ok : RevitTheme.Error;
-                runs.Detail.Text = item.Describe() + $"; {okGroups} grupo(s) de barras" + (bad > 0 ? $", {bad} INSUFICIENTE(S)" : "") +
+                var notConnected = analysis?.Joints.Count(j => !j.Connected) ?? 0;
+                runs.Kind.Foreground = errors == 0 && item.InsufficientCount == 0 ? RevitTheme.Ok : RevitTheme.Error;
+                runs.Detail.Text = item.Describe() + "; " + item.PlanSummary() +
+                                   (notConnected > 0 ? $"; {notConnected} viga(s) no conectada(s)" : "") +
                                    (errors > 0 ? $"; {errors} error(es)" : "");
             }
         }
 
-        var missingTypes = string.IsNullOrEmpty(scratch.TopBarTypeName) || string.IsNullOrEmpty(scratch.BottomBarTypeName);
-        _buildButton.Content = "Armar " + buildable + " columna(s)";
+        var missingTypes = (string.IsNullOrEmpty(scratch.TopBarTypeName) || string.IsNullOrEmpty(scratch.BottomBarTypeName)) &&
+                           _items.Any(i => i.NewGroups > 0);
+        _buildButton.Content = fixes > 0 ? $"Armar {buildable} columna(s) ({fixes} corrección(es))" : "Armar " + buildable + " columna(s)";
         _buildButton.IsEnabled = buildable > 0 && error == null;
 
         if (_selected is { CanBuild: true } && _selected.Analysis != null)
         {
             if (_selectedBeam == null || !_selected.Beams.Contains(_selectedBeam)) _selectedBeam = _selected.Beams.FirstOrDefault(b => b.Include);
             _previewCaption.Text = _selected.Tag + _selected.Kind + ", " + _selected.Describe() +
-                                   (missingTypes ? "  (sin tipo de barra elegido: se usa el del modelo o Ø16 orientativo)" : "");
+                                   (missingTypes ? "  (sin tipo de barra elegido para las barras nuevas: se usa el del modelo o Ø16 orientativo)" : "");
             _plan.Show(_selected, _selectedBeam);
             _elevation.Show(_selected, _selectedBeam);
         }
@@ -601,7 +692,7 @@ public sealed class JointWindow : Window
         RefreshBeams();
 
         if (error != null) { _message.Foreground = RevitTheme.Error; _message.Text = error; }
-        else if (insufficient > 0) { _message.Foreground = RevitTheme.Error; _message.Text = $"{insufficient} capa(s) con anclaje INSUFICIENTE: no se crearán; cambia el diámetro, el número de barras o la columna."; }
+        else if (insufficient > 0) { _message.Foreground = RevitTheme.Error; _message.Text = $"{insufficient} capa(s)/barra(s) con anclaje INSUFICIENTE: no se crearán ni corregirán; cambia el diámetro, el número de barras o la columna."; }
         else if (ReferenceEquals(_message.Foreground, RevitTheme.Error)) _message.Text = "";
     }
 
@@ -609,7 +700,7 @@ public sealed class JointWindow : Window
     {
         var c = ReadConfig(out var error);
         if (error != null) { _message.Foreground = RevitTheme.Error; _message.Text = error; return; }
-        if (string.IsNullOrEmpty(c.HookTypeName) && _items.Any(i => i.Analysis?.BarGroups.Any(g => g.EndHook != null) == true))
+        if (string.IsNullOrEmpty(c.HookTypeName) && _items.Any(i => i.ActivePlans.Any(p => p.NeedsHook)))
         {
             _message.Foreground = RevitTheme.Error;
             _message.Text = "Elige el tipo de gancho de 90°: hay barras que se anclan con gancho.";

@@ -5,8 +5,18 @@ using UnionesAcero.Core.Model;
 
 namespace UnionesAcero.Core.Verification;
 
-/// <summary>Barra existente en el modelo (eje en mm, con cota).</summary>
-public sealed record ExistingBar(long Id, string BeamName, double Diameter, IReadOnlyList<Vec3> Centerline, string? Description = null);
+/// <summary>
+/// Barra existente en el modelo (eje en mm, con cota). <see cref="Centerline"/> incluye los ganchos
+/// (para verificar y dibujar); <see cref="BareCenterline"/> es el eje sin ganchos (para reconstruir
+/// la barra al corregirla). Si no se da, se usa el mismo eje.
+/// </summary>
+public sealed record ExistingBar(long Id, string BeamName, double Diameter, IReadOnlyList<Vec3> Centerline, string? Description = null)
+{
+    public IReadOnlyList<Vec3>? BareCenterline { get; init; }
+
+    /// <summary>Número de barras del conjunto en el modelo (informativo).</summary>
+    public int Count { get; init; } = 1;
+}
 
 public enum CheckStatus
 {

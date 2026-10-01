@@ -32,6 +32,7 @@ namespace UnionesAcero.Revit.UI
         public static readonly Brush Selection = Make("#1F3F66");   // fila seleccionada
         public static readonly Brush Ok = Make("#6FCF7F");          // texto de exito (antes DarkGreen)
         public static readonly Brush Error = Make("#FF6B6B");       // texto de error (antes Firebrick)
+        public static readonly Brush Warn = Make("#F2B84B");        // texto de aviso / correccion propuesta
         public static readonly Brush OwnValue = Make("#4A4420");    // casilla con valor propio (antes LightYellow)
         public static readonly Brush Invalid = Make("#5A2E2E");     // casilla con valor no valido (antes MistyRose)
         public static readonly Brush Paper = Make("#FFFFFF");       // fondo de los esquemas (como el area de dibujo)

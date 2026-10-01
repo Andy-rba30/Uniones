@@ -17,6 +17,7 @@
   "bottomBarCount": 3,
   "hookTypeName": "90",
   "inferBarsFromModel": true,
+  "existingBarsMode": "fix",
 
   "embedToFarFace": true,
   "autoStaggerCrossingLayers": true,

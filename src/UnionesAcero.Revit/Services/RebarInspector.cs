@@ -8,38 +8,57 @@ namespace UnionesAcero.Revit.Services;
 /// <summary>Convierte las barras modeladas en las vigas al formato del verificador del núcleo.</summary>
 public static class RebarInspector
 {
+    /// <summary>Barras longitudinales (no estribos) alojadas en la viga, una entrada por conjunto (Rebar).</summary>
     public static List<(Rebar Rebar, ExistingBar Bar)> CollectBars(Document doc, FamilyInstance beam, string beamName)
     {
         var result = new List<(Rebar, ExistingBar)>();
-        var host = RebarHostData.GetRebarHostData(beam);
+        RebarHostData? host;
+        try { host = RebarHostData.GetRebarHostData(beam); }
+        catch { return result; }
         if (host == null) return result;
 
         foreach (var rebar in host.GetRebarsInHost())
         {
-            if (doc.GetElement(rebar.GetTypeId()) is not RebarBarType bt) continue;
-            var db = Units.ToMm(bt.BarNominalDiameter);
-            var positions = Math.Max(1, rebar.NumberOfBarPositions);
-            for (var i = 0; i < positions; i++)
-            {
-                if (!rebar.DoesBarExistAtPosition(i)) continue;
-                IList<Curve> curves;
-                try
-                {
-                    // Sin radios de doblado (esquinas vivas) y con ganchos incluidos.
-                    curves = rebar.GetCenterlineCurves(false, false, true, MultiplanarOption.IncludeOnlyPlanarCurves, i);
-                }
-                catch (Autodesk.Revit.Exceptions.ApplicationException)
-                {
-                    continue;
-                }
-                var pts = ToPolyline(curves);
-                if (pts.Count < 2) continue;
-                result.Add((rebar, new ExistingBar(rebar.Id.Value, beamName, db, pts, i > 0 ? $"posición {i + 1}" : null)));
-                // Con una posición basta para el veredicto del conjunto: todas las barras del set son iguales.
-                break;
-            }
+            if (doc.GetElement(rebar.GetShapeId()) is RebarShape shape && shape.RebarStyle == RebarStyle.StirrupTie) continue;
+            var bar = Describe(doc, rebar, beamName);
+            if (bar != null) result.Add((rebar, bar));
         }
         return result;
+    }
+
+    /// <summary>
+    /// Eje (con y sin ganchos) de la primera posición existente del conjunto. Con una posición basta
+    /// para el veredicto y para reconstruir el conjunto: todas las barras del set son iguales.
+    /// </summary>
+    public static ExistingBar? Describe(Document doc, Rebar rebar, string beamName)
+    {
+        if (doc.GetElement(rebar.GetTypeId()) is not RebarBarType bt) return null;
+        var db = Units.ToMm(bt.BarNominalDiameter);
+        var positions = Math.Max(1, rebar.NumberOfBarPositions);
+        for (var i = 0; i < positions; i++)
+        {
+            if (!rebar.DoesBarExistAtPosition(i)) continue;
+            IList<Curve> hooked, bare;
+            try
+            {
+                // Sin radios de doblado (esquinas vivas); una vez con ganchos y otra sin ellos.
+                hooked = rebar.GetCenterlineCurves(false, false, true, MultiplanarOption.IncludeOnlyPlanarCurves, i);
+                bare = rebar.GetCenterlineCurves(false, true, true, MultiplanarOption.IncludeOnlyPlanarCurves, i);
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException)
+            {
+                continue;
+            }
+            var pts = ToPolyline(hooked);
+            if (pts.Count < 2) continue;
+            var barePts = ToPolyline(bare);
+            return new ExistingBar(rebar.Id.Value, beamName, db, pts, i > 0 ? $"posición {i + 1}" : null)
+            {
+                BareCenterline = barePts.Count >= 2 ? barePts : pts,
+                Count = positions
+            };
+        }
+        return null;
     }
 
     private static List<Vec3> ToPolyline(IList<Curve> curves)
