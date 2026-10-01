@@ -23,10 +23,29 @@ public sealed class RebarBuilder
 
     public bool HasBarTypes => _barTypes.Count > 0;
 
-    /// <summary>Crea el grupo de barras. Devuelve null si no fue posible.</summary>
-    public Rebar? Create(BarGroup group, Element host)
+    /// <summary>Nombre (o fragmento) del tipo de gancho de 90° a usar. Vacío = el primero de 90° del proyecto.</summary>
+    public string HookTypeName { get; set; } = "";
+
+    /// <summary>Tipo de barra por nombre exacto o fragmento (null si no hay coincidencia).</summary>
+    public RebarBarType? BarTypeByName(string? name) => MatchName(_barTypes, name);
+
+    public RebarHookType? HookByName(string? name) => MatchName(_hookTypes, name);
+
+    public static T? MatchName<T>(IEnumerable<T> items, string? name) where T : Element
     {
-        var barType = ClosestBarType(group.Diameter);
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        var list = items.ToList();
+        return list.FirstOrDefault(i => string.Equals(i.Name, name, StringComparison.OrdinalIgnoreCase))
+               ?? list.FirstOrDefault(i => i.Name.Contains(name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Crea el grupo de barras. Devuelve null si no fue posible. Con <paramref name="flipHook"/>
+    /// se invierte la orientación del gancho (para reintentar si quedó fuera del hormigón).
+    /// </summary>
+    public Rebar? Create(BarGroup group, Element host, bool flipHook = false)
+    {
+        var barType = BarTypeByName(group.BarTypeName) ?? ClosestBarType(group.Diameter);
         if (barType == null)
         {
             Notes.Add($"{group.Label}: el proyecto no tiene tipos de barra (RebarBarType).");
@@ -55,7 +74,7 @@ public sealed class RebarBuilder
 
         if (group.EndHook != null)
         {
-            var hook = HookType((int)group.EndHook.Angle);
+            var hook = HookByName(HookTypeName) ?? HookType((int)group.EndHook.Angle);
             if (hook == null)
             {
                 Notes.Add($"{group.Label}: el proyecto no tiene un tipo de gancho de {(int)group.EndHook.Angle}°; la barra se crea sin gancho. Revisar manualmente.");
@@ -63,7 +82,9 @@ public sealed class RebarBuilder
             else
             {
                 terminations.HookTypeIdAtEnd = hook.Id;
-                terminations.TerminationOrientationAtEnd = HookOrientation(group, normal);
+                var orient = HookOrientation(group, normal);
+                if (flipHook) orient = orient == RebarTerminationOrientation.Left ? RebarTerminationOrientation.Right : RebarTerminationOrientation.Left;
+                terminations.TerminationOrientationAtEnd = orient;
                 var ext = Units.ToMm(hook.GetHookExtensionLength(barType));
                 if (Math.Abs(ext - group.EndHook.Extension) > 1)
                     Notes.Add($"{group.Label}: el gancho '{hook.Name}' tiene extensión {ext:0} mm; la norma pide {group.EndHook.Extension:0} mm.");

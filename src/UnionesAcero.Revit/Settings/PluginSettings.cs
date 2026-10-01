@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using UnionesAcero.Core.Codes;
@@ -6,7 +7,11 @@ using UnionesAcero.Core.Model;
 
 namespace UnionesAcero.Revit.Settings;
 
-/// <summary>Configuración persistente del complemento (JSON en %AppData%\UnionesAcero\settings.json).</summary>
+/// <summary>
+/// Valores por defecto de la ventana (config.json junto a la DLL, como en los add-ins de columnas
+/// y muros). Lo que se cambia en la ventana vale solo para esa vez salvo que se pulse
+/// "Guardar como valores por defecto".
+/// </summary>
 public sealed class PluginSettings
 {
     public string CodeKey { get; set; } = "ACI318";
@@ -17,54 +22,85 @@ public sealed class PluginSettings
     public bool EpoxyCoated { get; set; }
 
     /// <summary>Recubrimiento de columna si el modelo no define uno (mm).</summary>
-    public double ColumnCover { get; set; } = 40;
-    public double ColumnTieDiameter { get; set; } = 10;
-    public double ColumnBarDiameter { get; set; } = 16;
+    public double ColumnCoverMm { get; set; } = 40;
+    public double ColumnTieDiameterMm { get; set; } = 10;
 
     /// <summary>Recubrimiento de viga si el modelo no define uno (mm).</summary>
-    public double BeamCover { get; set; } = 40;
-    public double BeamStirrupDiameter { get; set; } = 10;
-    public double TopBarDiameter { get; set; } = 16;
+    public double BeamCoverMm { get; set; } = 40;
+    public double BeamStirrupDiameterMm { get; set; } = 10;
+
+    /// <summary>Tipo de barra (RebarBarType) por defecto de la capa superior e inferior: nombre exacto o fragmento.</summary>
+    public string TopBarTypeName { get; set; } = "";
     public int TopBarCount { get; set; } = 3;
-    public double BottomBarDiameter { get; set; } = 16;
+    public string BottomBarTypeName { get; set; } = "";
     public int BottomBarCount { get; set; } = 3;
 
-    /// <summary>Si la viga ya tiene barras modeladas, usar su diámetro y cantidad.</summary>
+    /// <summary>Tipo de gancho (RebarHookType) de 90° para los anclajes: nombre exacto o fragmento.</summary>
+    public string HookTypeName { get; set; } = "90";
+
+    /// <summary>Si la viga ya tiene barras longitudinales modeladas, proponer su diámetro y cantidad.</summary>
     public bool InferBarsFromModel { get; set; } = true;
 
     public bool EmbedToFarFace { get; set; } = true;
     public bool AutoStaggerCrossingLayers { get; set; } = true;
-    public double? ExtensionIntoBeam { get; set; }
-    public double HookClearance { get; set; } = 0;
-    public double LengthRounding { get; set; } = 10;
+    /// <summary>Extensión de la barra dentro de la viga desde la cara de la columna (mm). null = 2h + traslape.</summary>
+    public double? ExtensionIntoBeamMm { get; set; }
+    public double HookClearanceMm { get; set; } = 0;
+    public double LengthRoundingMm { get; set; } = 10;
 
     /// <summary>Distancia (mm) alrededor de la columna donde se buscan vigas.</summary>
-    public double BeamSearchDistance { get; set; } = 300;
+    public double BeamSearchDistanceMm { get; set; } = 300;
 
-    [JsonIgnore]
-    public static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "UnionesAcero", "settings.json");
+    /// <summary>Marcar en rojo en la vista activa las barras existentes que no cumplen.</summary>
+    public bool HighlightFailingExistingBars { get; set; } = true;
 
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions ReadOptions = new()
+    {
+        PropertyNameCaseInsensitive = true, ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true
+    };
+
+    private static readonly JsonSerializerOptions WriteOptions = new()
+    {
+        WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    public static string ConfigPath()
+    {
+        var dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ".";
+        return Path.Combine(dir, "config.json");
+    }
 
     public static PluginSettings Load()
     {
         try
         {
-            if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<PluginSettings>(File.ReadAllText(FilePath), JsonOptions) ?? new PluginSettings();
+            var path = ConfigPath();
+            if (File.Exists(path))
+                return (JsonSerializer.Deserialize<PluginSettings>(File.ReadAllText(path), ReadOptions) ?? new PluginSettings()).Normalized();
         }
         catch
         {
-            // Archivo corrupto: se usan valores por defecto.
+            // config.json ilegible: valores por defecto
         }
         return new PluginSettings();
     }
 
-    public void Save()
+    public void Save(string? path = null) => File.WriteAllText(path ?? ConfigPath(), JsonSerializer.Serialize(this, WriteOptions));
+
+    public PluginSettings Clone() =>
+        (JsonSerializer.Deserialize<PluginSettings>(JsonSerializer.Serialize(this, WriteOptions), ReadOptions) ?? new PluginSettings()).Normalized();
+
+    public PluginSettings Normalized()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions));
+        TopBarTypeName ??= ""; BottomBarTypeName ??= ""; HookTypeName ??= "";
+        if (TopBarCount < 1) TopBarCount = 1;
+        if (BottomBarCount < 1) BottomBarCount = 1;
+        if (LengthRoundingMm < 0) LengthRoundingMm = 0;
+        if (BeamSearchDistanceMm < 0) BeamSearchDistanceMm = 0;
+        if (Fy <= 0) Fy = 420;
+        if (Fc <= 0) Fc = 21;
+        return this;
     }
 
     public JointOptions ToJointOptions() => new()
@@ -74,8 +110,8 @@ public sealed class PluginSettings
         SeismicJoint = SeismicJoint,
         EmbedToFarFace = EmbedToFarFace,
         AutoStaggerCrossingLayers = AutoStaggerCrossingLayers,
-        ExtensionIntoBeam = ExtensionIntoBeam,
-        HookClearance = HookClearance,
-        LengthRounding = LengthRounding
+        ExtensionIntoBeam = ExtensionIntoBeamMm,
+        HookClearance = HookClearanceMm,
+        LengthRounding = LengthRoundingMm
     };
 }

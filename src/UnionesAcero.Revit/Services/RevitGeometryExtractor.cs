@@ -35,12 +35,11 @@ public sealed class RevitGeometryExtractor
         var zMin = Units.ToMm(bb.Transform.OfPoint(bb.Min).Z);
         var zMax = Units.ToMm(bb.Transform.OfPoint(bb.Max).Z);
 
-        var cover = CoverMm(column) ?? _settings.ColumnCover;
+        var cover = CoverMm(column) ?? _settings.ColumnCoverMm;
         return new ColumnSection(ElementLabel(column), outline)
         {
             Cover = cover,
-            TieDiameter = _settings.ColumnTieDiameter,
-            LongitudinalBarDiameter = _settings.ColumnBarDiameter,
+            TieDiameter = _settings.ColumnTieDiameterMm,
             TopElevation = zMax,
             BottomElevation = zMin,
             SourceId = column.Id.Value
@@ -95,7 +94,7 @@ public sealed class RevitGeometryExtractor
     {
         var bb = column.get_BoundingBox(null);
         if (bb == null) return new List<FamilyInstance>();
-        var tol = Units.ToFt(_settings.BeamSearchDistance);
+        var tol = Units.ToFt(_settings.BeamSearchDistanceMm);
         var outline = new Outline(bb.Min - new XYZ(tol, tol, tol), bb.Max + new XYZ(tol, tol, tol));
         var filter = new BoundingBoxIntersectsFilter(outline);
         return new FilteredElementCollector(_doc)
@@ -107,8 +106,12 @@ public sealed class RevitGeometryExtractor
             .ToList();
     }
 
-    public BeamSection? ExtractBeam(FamilyInstance beam)
+    public BeamSection? ExtractBeam(FamilyInstance beam) => ExtractBeam(beam, out _);
+
+    /// <param name="modelBars">Barras longitudinales encontradas en la viga (null si no tiene).</param>
+    public BeamSection? ExtractBeam(FamilyInstance beam, out (double TopDb, int TopN, double BottomDb, int BottomN)? modelBars)
     {
+        modelBars = null;
         if (beam.Location is not LocationCurve lc || lc.Curve is not Line line)
         {
             Notes.Add($"{ElementLabel(beam)}: la viga no es recta; se omite.");
@@ -154,29 +157,26 @@ public sealed class RevitGeometryExtractor
         var start = Units.ToMm2(p0 + shift);
         var end = Units.ToMm2(p1 + shift);
 
-        var cover = CoverMm(beam) ?? _settings.BeamCover;
-        var bars = InferBars(beam, u, zMin, zMax);
+        var cover = CoverMm(beam) ?? _settings.BeamCoverMm;
+        modelBars = InferBars(beam, u, zMin, zMax);
 
         return new BeamSection(ElementLabel(beam), start, end, width, depth)
         {
             TopElevation = Units.ToMm(zMax),
             Cover = cover,
-            StirrupDiameter = _settings.BeamStirrupDiameter,
-            TopBarDiameter = bars.TopDiameter,
-            TopBarCount = bars.TopCount,
-            BottomBarDiameter = bars.BottomDiameter,
-            BottomBarCount = bars.BottomCount,
+            StirrupDiameter = _settings.BeamStirrupDiameterMm,
+            TopBarDiameter = modelBars?.TopDb ?? 16,
+            TopBarCount = modelBars?.TopN ?? _settings.TopBarCount,
+            BottomBarDiameter = modelBars?.BottomDb ?? 16,
+            BottomBarCount = modelBars?.BottomN ?? _settings.BottomBarCount,
             SourceId = beam.Id.Value
         };
     }
 
-    private (double TopDiameter, int TopCount, double BottomDiameter, int BottomCount) InferBars(FamilyInstance beam, XYZ u, double zMin, double zMax)
+    private (double TopDb, int TopN, double BottomDb, int BottomN)? InferBars(FamilyInstance beam, XYZ u, double zMin, double zMax)
     {
-        var result = (_settings.TopBarDiameter, _settings.TopBarCount, _settings.BottomBarDiameter, _settings.BottomBarCount);
-        if (!_settings.InferBarsFromModel) return result;
-
         var host = RebarHostData.GetRebarHostData(beam);
-        if (host == null) return result;
+        if (host == null) return null;
 
         var zMid = (zMin + zMax) / 2;
         var top = new List<(double Db, int N)>();
@@ -197,18 +197,13 @@ public sealed class RevitGeometryExtractor
             if (z >= zMid) top.Add(entry); else bottom.Add(entry);
         }
 
-        if (top.Count > 0)
-        {
-            result.TopBarDiameter = top.Max(t => t.Db);
-            result.TopBarCount = top.Sum(t => t.N);
-            Notes.Add($"{ElementLabel(beam)}: barras superiores tomadas del modelo ({result.TopBarCount}Ø{result.TopBarDiameter:0}).");
-        }
-        if (bottom.Count > 0)
-        {
-            result.BottomBarDiameter = bottom.Max(t => t.Db);
-            result.BottomBarCount = bottom.Sum(t => t.N);
-            Notes.Add($"{ElementLabel(beam)}: barras inferiores tomadas del modelo ({result.BottomBarCount}Ø{result.BottomBarDiameter:0}).");
-        }
+        if (top.Count == 0 && bottom.Count == 0) return null;
+        var result = (
+            TopDb: top.Count > 0 ? top.Max(t => t.Db) : 0,
+            TopN: top.Count > 0 ? top.Sum(t => t.N) : 0,
+            BottomDb: bottom.Count > 0 ? bottom.Max(t => t.Db) : 0,
+            BottomN: bottom.Count > 0 ? bottom.Sum(t => t.N) : 0);
+        Notes.Add($"{ElementLabel(beam)}: barras en el modelo: sup. {result.TopN}Ø{result.TopDb:0}, inf. {result.BottomN}Ø{result.BottomDb:0}.");
         return result;
     }
 
@@ -217,7 +212,14 @@ public sealed class RevitGeometryExtractor
     public static Solid? LargestSolid(Element element)
     {
         var options = new Options { DetailLevel = ViewDetailLevel.Fine, ComputeReferences = false, IncludeNonVisibleObjects = false };
-        var geometry = element.get_Geometry(options);
+        GeometryElement? geometry = null;
+        // Si el elemento está unido a otros (vigas, losas) la geometría visible tiene recortes; la
+        // original de la familia es la sección completa, que es la que atraviesan las barras.
+        if (element is FamilyInstance fi)
+        {
+            try { geometry = fi.GetOriginalGeometry(options); } catch { geometry = null; }
+        }
+        geometry ??= element.get_Geometry(options);
         if (geometry == null) return null;
         Solid? best = null;
         foreach (var obj in geometry)

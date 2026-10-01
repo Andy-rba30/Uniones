@@ -259,7 +259,7 @@ public sealed class JointAnalyzer
                 var pts = new[] { Vec3.From(start, z), Vec3.From(end, z) };
                 group = new BarGroup
                 {
-                    BeamName = beam.Name, BeamSourceId = beam.SourceId, Layer = layer, Diameter = db, Count = n, Spacing = spacing,
+                    BeamName = beam.Name, BeamSourceId = beam.SourceId, Layer = layer, Diameter = db, BarTypeName = beam.BarTypeName(layer), Count = n, Spacing = spacing,
                     Decision = AnchorageDecision.PassThrough, Centerline = pts, FullCenterline = pts,
                     PlaneNormal = Vec3.From(v, 0), ArrayDirection = Vec3.From(v, 0), Elevation = z,
                     RequiredLength = minDim ?? 0, ProvidedLength = joint.AvailableDepth,
@@ -324,7 +324,7 @@ public sealed class JointAnalyzer
 
         var group2 = new BarGroup
         {
-            BeamName = beam.Name, BeamSourceId = beam.SourceId, Layer = layer, Diameter = db, Count = n, Spacing = spacing,
+            BeamName = beam.Name, BeamSourceId = beam.SourceId, Layer = layer, Diameter = db, BarTypeName = beam.BarTypeName(layer), Count = n, Spacing = spacing,
             Decision = decision, Centerline = centerline, EndHook = hook, FullCenterline = full,
             PlaneNormal = Vec3.From(v, 0), ArrayDirection = Vec3.From(v, 0), Elevation = z,
             RequiredLength = required, ProvidedLength = provided, Formula = formula,
@@ -433,7 +433,7 @@ public sealed class JointAnalyzer
         var d = new Vec3(0, 0, dz);
         return new BarGroup
         {
-            BeamName = g.BeamName, BeamSourceId = g.BeamSourceId, Layer = g.Layer, Diameter = g.Diameter, Count = g.Count, Spacing = g.Spacing,
+            BeamName = g.BeamName, BeamSourceId = g.BeamSourceId, Layer = g.Layer, Diameter = g.Diameter, BarTypeName = g.BarTypeName, Count = g.Count, Spacing = g.Spacing,
             Decision = g.Decision, Centerline = g.Centerline.Select(p => p + d).ToList(), EndHook = g.EndHook,
             FullCenterline = g.FullCenterline.Select(p => p + d).ToList(), PlaneNormal = g.PlaneNormal, ArrayDirection = g.ArrayDirection,
             Elevation = g.Elevation + dz, RequiredLength = g.RequiredLength, ProvidedLength = g.ProvidedLength, Formula = g.Formula,

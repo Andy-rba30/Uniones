@@ -1,0 +1,28 @@
+{
+  "codeKey": "ACI318",
+  "fy": 420,
+  "fc": 21,
+  "seismicJoint": true,
+  "lightweightConcrete": false,
+  "epoxyCoated": false,
+
+  "columnCoverMm": 40,
+  "columnTieDiameterMm": 10,
+  "beamCoverMm": 40,
+  "beamStirrupDiameterMm": 10,
+
+  "topBarTypeName": "",
+  "topBarCount": 3,
+  "bottomBarTypeName": "",
+  "bottomBarCount": 3,
+  "hookTypeName": "90",
+  "inferBarsFromModel": true,
+
+  "embedToFarFace": true,
+  "autoStaggerCrossingLayers": true,
+  "extensionIntoBeamMm": null,
+  "hookClearanceMm": 0,
+  "lengthRoundingMm": 10,
+  "beamSearchDistanceMm": 300,
+  "highlightFailingExistingBars": true
+}

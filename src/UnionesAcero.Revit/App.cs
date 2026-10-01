@@ -1,48 +1,37 @@
 using System.Reflection;
 using Autodesk.Revit.UI;
+using UnionesAcero.Revit.Ribbon;
 
 namespace UnionesAcero.Revit;
 
-/// <summary>Punto de entrada: crea la pestaña "Uniones Acero" en la cinta de Revit.</summary>
+/// <summary>Añade el botón "Nudos" al desplegable "Acero" del panel "Acero" de la pestaña "ARBA".</summary>
 public sealed class App : IExternalApplication
 {
-    public const string TabName = "ARBA";
-
     public Result OnStartup(UIControlledApplication application)
     {
         try
         {
-            application.CreateRibbonTab(TabName);
+            ArbaRibbon.Ensure(application);
+            var assembly = Assembly.GetExecutingAssembly().Location;
+            var data = new PushButtonData("ARBA_Acero_Nudos", "Nudos", assembly, typeof(Commands.NudosCommand).FullName!)
+            {
+                ToolTip = "Detalla el anclaje de las barras de las vigas en columnas de cualquier sección (rectangular, L, T, cruz...)",
+                LongDescription = "Selecciona una o varias columnas estructurales y pulsa el botón. Se abre una ventana con la " +
+                                  "planta del nudo y el alzado de cada viga: ahí eliges normativa, barras, ganchos y recubrimientos, " +
+                                  "ves si el anclaje es recto, con gancho o insuficiente, y solo entonces se crean las barras.",
+                LargeImage = ArbaRibbon.IconNudo(32),
+                Image = ArbaRibbon.IconNudo(16)
+            };
+            ArbaRibbon.AddToPulldown(application, ArbaRibbon.PanelAceroName, ArbaRibbon.PanelAceroName, data);
+            return Result.Succeeded;
         }
-        catch (Autodesk.Revit.Exceptions.ArgumentException)
+        catch (Exception ex)
         {
-            // La pestaña ya existe (recarga del complemento).
+            TaskDialog.Show("ARBA", "No se pudo añadir el botón Nudos a la cinta: " + ex.Message +
+                                    "\nEl comando sigue disponible en Complementos > Herramientas externas.");
+            return Result.Failed;
         }
-
-        var panel = application.CreateRibbonPanel(TabName, "Nudos viga-columna");
-        var assembly = Assembly.GetExecutingAssembly().Location;
-
-        AddButton(panel, "Analizar", "Analizar\nnudo", typeof(Commands.AnalizarNudoCommand), assembly,
-            "Selecciona una columna de cualquier sección, detecta las vigas que llegan y calcula el anclaje de sus barras.");
-        AddButton(panel, "Generar", "Generar\narmado", typeof(Commands.GenerarArmadoCommand), assembly,
-            "Crea en el modelo las barras longitudinales de cada viga con el anclaje (recto o gancho) que corresponde en la columna.");
-        AddButton(panel, "Verificar", "Verificar\narmado", typeof(Commands.VerificarArmadoCommand), assembly,
-            "Revisa las barras ya modeladas en las vigas y marca en rojo las que no cumplen la longitud de anclaje.");
-        panel.AddSeparator();
-        AddButton(panel, "Configuracion", "Configuración", typeof(Commands.ConfiguracionCommand), assembly,
-            "Normativa, materiales, recubrimientos y barras por defecto.");
-
-        return Result.Succeeded;
     }
 
     public Result OnShutdown(UIControlledApplication application) => Result.Succeeded;
-
-    private static void AddButton(RibbonPanel panel, string name, string text, Type command, string assembly, string tooltip)
-    {
-        var data = new PushButtonData("UnionesAcero_" + name, text, assembly, command.FullName!)
-        {
-            ToolTip = tooltip
-        };
-        panel.AddItem(data);
-    }
 }

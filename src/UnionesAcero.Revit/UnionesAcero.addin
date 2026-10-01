@@ -1,11 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RevitAddIns>
   <AddIn Type="Application">
-    <Name>Uniones Acero</Name>
+    <Name>ARBA Nudos</Name>
     <Assembly>UnionesAcero\UnionesAcero.Revit.dll</Assembly>
     <AddInId>7E3C1F7A-6B0D-4D7B-9A2E-5C2F1A9B0C01</AddInId>
     <FullClassName>UnionesAcero.Revit.App</FullClassName>
-    <VendorId>UNIO</VendorId>
-    <VendorDescription>Uniones Acero - detallado de nudos viga-columna</VendorDescription>
+    <VendorId>LOCAL</VendorId>
+    <VendorDescription>Uso interno</VendorDescription>
+  </AddIn>
+  <AddIn Type="Command">
+    <Name>Nudos viga-columna</Name>
+    <Text>Nudos viga-columna</Text>
+    <Description>Detalla el anclaje de las barras de las vigas en columnas de cualquier sección, con ventana previa de planta y alzado.</Description>
+    <Assembly>UnionesAcero\UnionesAcero.Revit.dll</Assembly>
+    <FullClassName>UnionesAcero.Revit.Commands.NudosCommand</FullClassName>
+    <AddInId>9B4D2E6C-1A7F-4C3B-8D5E-2F6A7B8C9D02</AddInId>
+    <VendorId>LOCAL</VendorId>
+    <VendorDescription>Uso interno</VendorDescription>
+    <VisibilityMode>NotVisibleInFamily</VisibilityMode>
   </AddIn>
 </RevitAddIns>

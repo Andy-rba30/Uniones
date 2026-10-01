@@ -37,6 +37,8 @@ public sealed class BarGroup
     public long? BeamSourceId { get; init; }
     public required BarLayer Layer { get; init; }
     public required double Diameter { get; init; }
+    /// <summary>Nombre del tipo de barra en el modelo de origen, si se eligió uno.</summary>
+    public string? BarTypeName { get; init; }
     public required int Count { get; init; }
     /// <summary>Separación entre ejes de barras (mm). 0 si Count == 1.</summary>
     public required double Spacing { get; init; }

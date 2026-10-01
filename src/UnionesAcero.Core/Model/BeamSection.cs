@@ -41,6 +41,10 @@ public sealed class BeamSection
     public double BottomBarDiameter { get; init; } = 16;
     public int BottomBarCount { get; init; } = 3;
 
+    /// <summary>Nombre del tipo de barra en el modelo de origen (opcional; Revit: RebarBarType).</summary>
+    public string? TopBarTypeName { get; init; }
+    public string? BottomBarTypeName { get; init; }
+
     /// <summary>Identificador en el modelo de origen (ElementId en Revit).</summary>
     public long? SourceId { get; init; }
 
@@ -48,6 +52,7 @@ public sealed class BeamSection
 
     public double BarDiameter(BarLayer layer) => layer == BarLayer.Top ? TopBarDiameter : BottomBarDiameter;
     public int BarCount(BarLayer layer) => layer == BarLayer.Top ? TopBarCount : BottomBarCount;
+    public string? BarTypeName(BarLayer layer) => layer == BarLayer.Top ? TopBarTypeName : BottomBarTypeName;
 
     /// <summary>Cota del eje de las barras de la capa (mm).</summary>
     public double LayerElevation(BarLayer layer)

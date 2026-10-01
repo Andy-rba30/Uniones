@@ -34,6 +34,9 @@
     <None Update="UnionesAcero.addin">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <!--
@@ -47,9 +50,11 @@
     </PropertyGroup>
     <ItemGroup>
       <AddinBinaries Include="$(OutDir)UnionesAcero.Revit.dll;$(OutDir)UnionesAcero.Core.dll;$(OutDir)UnionesAcero.Revit.pdb;$(OutDir)UnionesAcero.Core.pdb" />
+      <AddinConfig Include="config.json" Condition="!Exists('$(RevitAddinTarget)\config.json')" />
     </ItemGroup>
     <MakeDir Directories="$(RevitAddinTarget)" Condition="Exists('$(RevitAddinsRoot)')" />
     <Copy SourceFiles="@(AddinBinaries)" DestinationFolder="$(RevitAddinTarget)" Condition="Exists('$(RevitAddinsRoot)')" ContinueOnError="true" />
+    <Copy SourceFiles="@(AddinConfig)" DestinationFolder="$(RevitAddinTarget)" Condition="Exists('$(RevitAddinsRoot)')" ContinueOnError="true" />
     <Copy SourceFiles="UnionesAcero.addin" DestinationFolder="$(RevitAddinsRoot)" Condition="Exists('$(RevitAddinsRoot)')" ContinueOnError="true" />
     <Message Importance="high" Text="UnionesAcero desplegado en $(RevitAddinTarget)" Condition="Exists('$(RevitAddinsRoot)')" />
   </Target>
