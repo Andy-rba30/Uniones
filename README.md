@@ -164,6 +164,11 @@ dotnet test
 - Armadura de la columna: si tiene estribos modelados se usa su diámetro para el núcleo confinado; si no,
   el de la configuración.
 
+## Hoja de ruta
+
+- **Anclaje de columnas en cimientos corridos y zapatas** (patillas en la base de la columna):
+  idea, diseño y plan de trabajo en [docs/PLAN-cimientos.md](docs/PLAN-cimientos.md). No implementado.
+
 ## Limitaciones y cosas a validar en obra/oficina
 
 - Es una herramienta de **detallado geométrico**: no diseña el refuerzo ni verifica cortante en el nudo,
