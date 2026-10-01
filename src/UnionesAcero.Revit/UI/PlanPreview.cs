@@ -148,13 +148,33 @@ public sealed class PlanPreview : Canvas
         return (near + vv * (s.Width / 2), far + vv * (s.Width / 2), far - vv * (s.Width / 2), near - vv * (s.Width / 2));
     }
 
+    /// <summary>
+    /// Longitud con la que se dibuja una viga conectada: lo justo para ver el nudo (en torno a una
+    /// vez y media la columna). Las barras que siguen más allá se recortan con <see cref="ClipToBeam"/>.
+    /// </summary>
     private double BeamDrawLength(BeamJoint j)
     {
         var (min, max) = _item!.Section!.Outline.Bounds;
         var colDim = Math.Max(max.X - min.X, max.Y - min.Y);
-        var ext = j.Layers.Select(l => l.Group).Where(g => g != null)
-            .Select(g => (g!.Centerline[0].XY - j.ContactPoint).Length).DefaultIfEmpty(0).Max();
-        return Math.Max(Math.Max(ext + 150, 0.6 * colDim), 400);
+        return Math.Max(Math.Max(1.5 * colDim, 2 * j.Beam.Depth), 500);
+    }
+
+    /// <summary>
+    /// Recorta un tramo de barra (en planta) al tramo de viga dibujado: lo que queda más lejos de la
+    /// columna que la longitud dibujada no se pinta. Devuelve false si el tramo queda fuera del todo.
+    /// </summary>
+    private bool ClipToBeam(BeamJoint j, Vec3 a, Vec3 c, out Vec3 a2, out Vec3 c2)
+    {
+        a2 = a; c2 = c;
+        var limit = -BeamDrawLength(j);
+        var da = (a.XY - j.ContactPoint).Dot(j.InwardDirection);
+        var dc = (c.XY - j.ContactPoint).Dot(j.InwardDirection);
+        if (da < limit && dc < limit) return false;
+        if (da >= limit && dc >= limit) return true;
+        var t = (limit - da) / (dc - da);
+        var cut = a + (c - a) * t;
+        if (da < limit) a2 = cut; else c2 = cut;
+        return true;
     }
 
     private static bool RectContains((Vec2 A, Vec2 B, Vec2 C, Vec2 D) r, Vec2 p)
@@ -259,6 +279,7 @@ public sealed class PlanPreview : Canvas
                 {
                     var a = bar.Centerline[i]; var c = bar.Centerline[i + 1];
                     if (Math.Abs(c.Z - a.Z) > 0.5 * a.DistanceTo(c)) continue; // tramo vertical (gancho): se omite en planta
+                    if (b.Joint is { Connected: true } bj && !ClipToBeam(bj, a, c, out a, out c)) continue;
                     Children.Add(new Line
                     {
                         X1 = X(a.X), Y1 = Y(a.Y), X2 = X(c.X), Y2 = Y(c.Y), Stroke = brush, StrokeThickness = willFix ? 1.2 : 1.6,
@@ -283,6 +304,7 @@ public sealed class PlanPreview : Canvas
                     {
                         var a = fix.Centerline[i]; var c = fix.Centerline[i + 1];
                         if (Math.Abs(c.Z - a.Z) > 0.5 * a.DistanceTo(c)) continue;
+                        if (b.Joint is { Connected: true } bj && !ClipToBeam(bj, a, c, out a, out c)) continue;
                         Children.Add(new Line
                         {
                             X1 = X(a.X), Y1 = Y(a.Y), X2 = X(c.X), Y2 = Y(c.Y), Stroke = PreviewColors.Fixed, StrokeThickness = th,
@@ -326,6 +348,7 @@ public sealed class PlanPreview : Canvas
                         for (var s = 0; s + 1 < g.Centerline.Count; s++)
                         {
                             var a = g.Centerline[s] + off; var c = g.Centerline[s + 1] + off;
+                            if (!ClipToBeam(j, a, c, out a, out c)) continue;
                             Children.Add(new Line
                             {
                                 X1 = X(a.X), Y1 = Y(a.Y), X2 = X(c.X), Y2 = Y(c.Y), Stroke = brush, StrokeThickness = th,
