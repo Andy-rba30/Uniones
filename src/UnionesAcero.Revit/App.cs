@@ -6,7 +6,7 @@ namespace UnionesAcero.Revit;
 /// <summary>Punto de entrada: crea la pestaña "Uniones Acero" en la cinta de Revit.</summary>
 public sealed class App : IExternalApplication
 {
-    public const string TabName = "Uniones Acero";
+    public const string TabName = "ARBA";
 
     public Result OnStartup(UIControlledApplication application)
     {

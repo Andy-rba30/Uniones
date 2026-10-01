@@ -7,7 +7,7 @@ en el modelo y verifica las que ya estén modeladas.
 
 ## Qué hace
 
-| Botón (pestaña *Uniones Acero*) | Acción |
+| Botón (pestaña *ARBA*, panel *Nudos viga-columna*) | Acción |
 |---|---|
 | **Analizar nudo** | Seleccionas una columna. El complemento obtiene su sección en planta, busca las vigas que llegan, calcula para cada capa (superior/inferior) la longitud de desarrollo recta `ld` y con gancho `ldh`, la compara con la profundidad útil de la columna en la dirección de la viga y muestra un informe. No modifica el modelo. |
 | **Generar armado** | Igual que Analizar, pero además crea en Revit un conjunto de barras (`Rebar`) por viga y capa, con el gancho a 90° cuando hace falta, repartidas en el ancho de la viga y extendidas dentro de la viga para traslapar. |
@@ -65,8 +65,8 @@ dotnet build -c Release
 ```
 
 Al compilar en Windows, el proyecto copia automáticamente `UnionesAcero.Revit.dll`, `UnionesAcero.Core.dll`
-y `UnionesAcero.addin` en `%AppData%\Autodesk\Revit\Addins\2027\`. Abre Revit y aparecerá la pestaña
-**Uniones Acero**. Para desactivar la copia: `dotnet build -p:DeployToRevit=false`.
+y `UnionesAcero.addin` en `%AppData%\Autodesk\Revit\Addins\2027\`. Abre Revit y aparecerá el panel
+**Nudos viga-columna** en la pestaña **ARBA** (se crea si no existe). Para desactivar la copia: `dotnet build -p:DeployToRevit=false`.
 
 Las referencias a la API vienen de los paquetes NuGet `Nice3point.Revit.Api.RevitAPI/RevitAPIUI 2027.2.0`
 (solo referencia, no se copian). Para otra versión 2027.x cambia `RevitApiPackageVersion` en el `.csproj`.
