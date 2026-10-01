@@ -32,8 +32,9 @@ public sealed class JointAnalyzer
         foreach (var beam in beamList)
             analysis.Joints.Add(ResolveContact(column, beam));
 
-        // 2. Vigas colineales (barras pasantes).
+        // 2. Vigas colineales (barras pasantes) y vigas duplicadas (misma cara, misma posición).
         ResolveOppositeBeams(analysis);
+        WarnDuplicateBeams(analysis);
 
         // 3. Decisión de anclaje por capa y generación de barras.
         var passThroughHandled = new HashSet<BeamSection>();
@@ -198,6 +199,31 @@ public sealed class JointAnalyzer
             analysis.Joints[i] = nj;
             // Actualizar el mapa para que la pareja apunte al nuevo objeto.
             paired[other] = nj;
+        }
+    }
+
+    /// <summary>
+    /// Dos vigas que entran por la misma cara, en la misma dirección y con los ejes casi coincidentes
+    /// suelen ser una viga modelada dos veces: se avisa para que el usuario la borre antes de armar.
+    /// </summary>
+    private void WarnDuplicateBeams(JointAnalysis analysis)
+    {
+        var joints = analysis.Joints.Where(j => j.Connected).ToList();
+        for (var i = 0; i < joints.Count; i++)
+        {
+            for (var k = i + 1; k < joints.Count; k++)
+            {
+                var a = joints[i];
+                var b = joints[k];
+                if (!GeometryUtil.SameDirection(a.InwardDirection, b.InwardDirection, _options.CollinearAngleTolerance)) continue;
+                var offset = Math.Abs((b.ContactPoint - a.ContactPoint).Dot(a.LateralDirection));
+                var along = Math.Abs((b.ContactPoint - a.ContactPoint).Dot(a.InwardDirection));
+                if (offset > Math.Min(a.Beam.Width, b.Beam.Width) / 2 || along > _options.ContactTolerance) continue;
+                a.Diagnostics.Add(new Diagnostic(Severity.Warning, a.Beam.Name,
+                    $"La viga {b.Beam.Name} llega por la misma cara y en la misma posición: parece una viga duplicada. Borra una antes de armar."));
+                b.Diagnostics.Add(new Diagnostic(Severity.Warning, b.Beam.Name,
+                    $"La viga {a.Beam.Name} llega por la misma cara y en la misma posición: parece una viga duplicada. Borra una antes de armar."));
+            }
         }
     }
 

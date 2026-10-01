@@ -98,7 +98,8 @@ Para cada viga que llega a la columna:
    **INSUFICIENTE** y se indica cuánto falta.
 5. Si dos vigas se cruzan dentro del nudo con las capas a la misma cota, la segunda capa se desplaza
    automáticamente para que una pase por encima de la otra (configurable).
-6. Se avisa si la viga sobresale de la cara de la columna, llega oblicua o no la toca.
+6. Se avisa si la viga sobresale de la cara de la columna, llega oblicua, no la toca, o si dos vigas llegan
+   por la misma cara en la misma posición (viga duplicada).
 
 ## Estructura
 
@@ -117,7 +118,7 @@ UnionesAcero.sln
 │   ├─ Services/              Lectura de geometría (columna, vigas, barras existentes), RebarBuilder
 │   ├─ UI/                    JointWindow, PlanPreview, ElevationPreview, RevitTheme (WPF en código)
 │   └─ config.json            Valores por defecto de la ventana
-└─ tests/UnionesAcero.Core.Tests   xUnit (41 pruebas: geometría, normas, analizador, verificador, corrector)
+└─ tests/UnionesAcero.Core.Tests   xUnit (42 pruebas: geometría, normas, analizador, verificador, corrector)
 ```
 
 El núcleo se puede reutilizar desde otro CAD (AutoCAD, Tekla) escribiendo solo otro adaptador.

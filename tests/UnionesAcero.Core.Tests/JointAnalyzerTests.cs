@@ -216,6 +216,20 @@ public class JointAnalyzerTests
     }
 
     [Fact]
+    public void DuplicateBeamOnSameFaceIsReported()
+    {
+        var col = new ColumnSection("C1", Polygon2D.Rectangle(400, 400));
+        var v1 = Beam("V1", new Vec2(-3000, 0), new Vec2(-200, 0));
+        var v2 = Beam("V1 copia", new Vec2(-2500, 10), new Vec2(-200, 10));
+        var a = new JointAnalyzer(Options()).Analyze(col, new[] { v1, v2 });
+        Assert.All(a.Joints, j => Assert.Contains(j.Diagnostics, d => d.Severity == Severity.Warning && d.Message.Contains("duplicada")));
+        // Dos vigas distintas por caras distintas no se confunden con duplicadas.
+        var v3 = Beam("V3", new Vec2(0, -3000), new Vec2(0, -200));
+        var b = new JointAnalyzer(Options()).Analyze(col, new[] { v1, v3 });
+        Assert.DoesNotContain(b.AllDiagnostics, d => d.Message.Contains("duplicada"));
+    }
+
+    [Fact]
     public void CrossingBeamsWithoutAutoStaggerWarn()
     {
         var col = new ColumnSection("C1", Polygon2D.Rectangle(400, 400));
