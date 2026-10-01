@@ -43,7 +43,8 @@ mismo estilo que los add-ins de columnas y muros). Seleccionas una o varias colu
   cumplen` en verde, `existentes 3Ø16 NO cumplen → corregir: gancho 90°` en ámbar, o `INSUFICIENTE` en
   rojo. Al pasar el ratón se ve el detalle de cada conjunto de barras.
 - **Vigas con barras modeladas** (desplegable): *verificar y corregir* (por defecto), *solo verificar* o
-  *ignorar y añadir barras nuevas*.
+  *ignorar y añadir barras nuevas*. Los campos que solo sirven para barras nuevas (tipo y número por capa,
+  extensión en la viga) se bloquean cuando la capa ya tiene barras modeladas.
 - **Normativa y materiales**: ACI 318-19, NSR-10, E.060 o Eurocódigo 2; fy, f'c, nudo sísmico,
   concreto liviano, barras epóxicas.
 - **Barras y gancho**: tipo de barra (RebarBarType) y cantidad por capa, tipo de gancho de 90°.

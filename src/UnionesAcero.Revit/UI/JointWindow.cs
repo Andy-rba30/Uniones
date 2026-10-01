@@ -35,7 +35,7 @@ public sealed class JointWindow : Window
     private TextBox _fy = null!, _fc = null!, _topN = null!, _botN = null!;
     private CheckBox _seismic = null!, _light = null!, _epoxy = null!, _infer = null!, _embedFar = null!, _stagger = null!, _highlight = null!;
     private TextBox _colCover = null!, _colTie = null!, _beamCover = null!, _beamStirrup = null!, _extension = null!, _clearance = null!, _rounding = null!;
-    private TextBlock _message = null!, _previewCaption = null!, _beamsCaption = null!, _existingText = null!;
+    private TextBlock _message = null!, _previewCaption = null!, _beamsCaption = null!, _existingText = null!, _barsHint = null!;
     private Button _buildButton = null!;
     private Grid _beamsGrid = null!;
     private PlanPreview _plan = null!;
@@ -43,7 +43,7 @@ public sealed class JointWindow : Window
 
     private readonly Dictionary<ColumnItem, (System.Windows.Documents.Run Kind, System.Windows.Documents.Run Detail)> _itemRuns = new();
     private readonly Dictionary<ColumnItem, Border> _itemRows = new();
-    private readonly List<(BeamItem Beam, TextBlock Top, TextBlock Bottom)> _beamRows = new();
+    private readonly List<(BeamItem Beam, TextBlock Top, TextBlock Bottom, Control[] TopInputs, Control[] BottomInputs)> _beamRows = new();
     private ColumnItem? _selected;
     private BeamItem? _selectedBeam;
     private ColumnItem? _beamsFor;
@@ -243,16 +243,20 @@ public sealed class JointWindow : Window
                     status.Children.Add(top);
                     status.Children.Add(bottom);
                     Place(status, row, 6);
-                    _beamRows.Add((b, top, bottom));
+                    _beamRows.Add((b, top, bottom, new Control[] { topType, topN }, new Control[] { botType, botN }));
                     row++;
                 }
             }
 
             // actualizar decisiones y resaltado de la viga seleccionada
-            foreach (var (b, top, bottom) in _beamRows)
+            foreach (var (b, top, bottom, topInputs, botInputs) in _beamRows)
             {
                 LayerStatus(b, BarLayer.Top, top);
                 LayerStatus(b, BarLayer.Bottom, bottom);
+                // Tipo y número solo cuentan para capas que recibirán barras nuevas; si la capa ya
+                // tiene barras (y no se eligió "ignorar y añadir") se bloquean para no confundir.
+                SetEnabled(topInputs, LayerTakesNewBars(b, BarLayer.Top));
+                SetEnabled(botInputs, LayerTakesNewBars(b, BarLayer.Bottom));
             }
             if (item != null)
             {
@@ -357,6 +361,23 @@ public sealed class JointWindow : Window
         return dot > 0 ? msg[..dot] : msg.TrimEnd('.');
     }
 
+    /// <summary>¿La capa recibirá barras nuevas (no tiene barras modeladas, o se eligió ignorarlas)?</summary>
+    private static bool LayerTakesNewBars(BeamItem b, BarLayer layer)
+    {
+        if (!b.Include || b.Joint is not { Connected: true }) return true;
+        var p = b.Plan(layer);
+        return p == null || p.Action is LayerAction.CreateNew || (p.Action == LayerAction.Insufficient && p.Unfixable.Count == 0);
+    }
+
+    private static void SetEnabled(IEnumerable<Control> controls, bool enabled)
+    {
+        foreach (var c in controls)
+        {
+            c.IsEnabled = enabled;
+            c.Opacity = enabled ? 1 : 0.45;
+        }
+    }
+
     private void Place(FrameworkElement e, int row, int col)
     {
         Grid.SetRow(e, row); Grid.SetColumn(e, col);
@@ -391,6 +412,11 @@ public sealed class JointWindow : Window
         var group = new GroupBox { Header = "Barras y gancho (valores generales para todas las vigas)", Padding = new Thickness(4) };
         var grid = FormGrid();
         var r = 0;
+        _barsHint = new TextBlock { Foreground = RevitTheme.Muted, TextWrapping = TextWrapping.Wrap, Margin = Pad };
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(_barsHint, r); Grid.SetColumn(_barsHint, 0); Grid.SetColumnSpan(_barsHint, 2);
+        grid.Children.Add(_barsHint);
+        r++;
         _topType = TypeCombo(_cfg.TopBarTypeName, withGeneral: false);
         var topRow = new StackPanel { Orientation = Orientation.Horizontal };
         _topN = CountBox(_cfg.TopBarCount);
@@ -670,6 +696,11 @@ public sealed class JointWindow : Window
             }
         }
 
+        var anyNew = _items.Where(i => i.CanBuild).SelectMany(i => i.Beams).Any(b => LayerTakesNewBars(b, BarLayer.Top) || LayerTakesNewBars(b, BarLayer.Bottom));
+        SetEnabled(new Control[] { _topType, _topN, _botType, _botN, _infer, _extension }, anyNew);
+        _barsHint.Text = anyNew
+            ? "Tipo y número de barras para las capas que recibirán barras nuevas (las que no tienen barras modeladas)."
+            : "Todas las capas ya tienen barras modeladas: se verifican y corrigen las existentes, así que tipo, número y extensión no se usan (bloqueados).";
         var missingTypes = (string.IsNullOrEmpty(scratch.TopBarTypeName) || string.IsNullOrEmpty(scratch.BottomBarTypeName)) &&
                            _items.Any(i => i.NewGroups > 0);
         _buildButton.Content = fixes > 0 ? $"Armar {buildable} columna(s) ({fixes} corrección(es))" : "Armar " + buildable + " columna(s)";
