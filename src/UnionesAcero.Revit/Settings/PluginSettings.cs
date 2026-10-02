@@ -78,6 +78,21 @@ public sealed class PluginSettings
     /// <summary>Extensión de la barra dentro de la viga desde la cara de la columna (mm). null = 2h + traslape.</summary>
     public double? ExtensionIntoBeamMm { get; set; }
     public double HookClearanceMm { get; set; } = 0;
+
+    /// <summary>Correr en planta las barras de la viga que coinciden con las verticales de la columna.</summary>
+    public bool ResolveColumnBarClash { get; set; } = true;
+
+    /// <summary>Separación libre deseada entre barra de viga y vertical de columna (mm); si no cabe se admite el contacto.</summary>
+    public double ColumnBarClearanceMm { get; set; } = 25;
+
+    /// <summary>Retrasar el gancho de la viga secundaria cuando choca con la principal en la misma esquina.</summary>
+    public bool ResolveHookLegClash { get; set; } = true;
+
+    /// <summary>Barras pasantes ya modeladas: hacer continua la de la viga principal y empalmarla fuera del nudo.</summary>
+    public bool SplicePassThroughBars { get; set; } = true;
+
+    /// <summary>Longitud comercial de la varilla (mm).</summary>
+    public double CommercialBarLengthMm { get; set; } = 9000;
     public double LengthRoundingMm { get; set; } = 10;
 
     /// <summary>Distancia (mm) alrededor de la columna donde se buscan vigas.</summary>
@@ -130,6 +145,8 @@ public sealed class PluginSettings
         if (TopBarCount < 1) TopBarCount = 1;
         if (BottomBarCount < 1) BottomBarCount = 1;
         if (LengthRoundingMm < 0) LengthRoundingMm = 0;
+        if (ColumnBarClearanceMm < 0) ColumnBarClearanceMm = 0;
+        if (CommercialBarLengthMm < 1000) CommercialBarLengthMm = 9000;
         if (BeamSearchDistanceMm < 0) BeamSearchDistanceMm = 0;
         if (Fy <= 0) Fy = 420;
         if (Fc <= 0) Fc = 21;
@@ -145,6 +162,11 @@ public sealed class PluginSettings
         AutoStaggerCrossingLayers = AutoStaggerCrossingLayers,
         ExtensionIntoBeam = ExtensionIntoBeamMm,
         HookClearance = HookClearanceMm,
-        LengthRounding = LengthRoundingMm
+        LengthRounding = LengthRoundingMm,
+        ResolveColumnBarClash = ResolveColumnBarClash,
+        ColumnBarClearance = ColumnBarClearanceMm,
+        ResolveHookLegClash = ResolveHookLegClash,
+        SplicePassThroughBars = SplicePassThroughBars,
+        CommercialBarLength = CommercialBarLengthMm
     };
 }

@@ -9,6 +9,9 @@ namespace UnionesAcero.Revit.Services;
 /// <summary>Armadura ya modelada en una columna (informativa y para el núcleo confinado).</summary>
 public sealed record ColumnRebarInfo(int LongitudinalCount, double LongitudinalDb, double TieDb, int RebarSets)
 {
+    /// <summary>Posición en planta (mm, proyecto) de cada barra vertical leída del modelo.</summary>
+    public IReadOnlyList<Vec2> Positions { get; init; } = Array.Empty<Vec2>();
+
     public string Describe()
     {
         var parts = new List<string>();
@@ -57,6 +60,7 @@ public sealed class RevitGeometryExtractor
             Cover = cover,
             TieDiameter = modelRebar is { TieDb: > 0 } mr ? mr.TieDb : _settings.ColumnTieDiameterMm,
             LongitudinalBarDiameter = modelRebar is { LongitudinalDb: > 0 } ml ? ml.LongitudinalDb : 16,
+            LongitudinalBarPositions = modelRebar?.Positions ?? Array.Empty<Vec2>(),
             TopElevation = zMax,
             BottomElevation = zMin,
             SourceId = column.Id.Value
@@ -111,6 +115,7 @@ public sealed class RevitGeometryExtractor
         var sets = 0;
         var longCount = 0;
         double longDb = 0, tieDb = 0;
+        var positions = new List<Vec2>();
         foreach (var rebar in host.GetRebarsInHost())
         {
             sets++;
@@ -126,8 +131,24 @@ public sealed class RevitGeometryExtractor
                 if (main == null) continue;
                 if (Math.Abs(main.Direction.Z) > 0.95)
                 {
-                    longCount += Math.Max(1, rebar.NumberOfBarPositions);
+                    var n = Math.Max(1, rebar.NumberOfBarPositions);
+                    longCount += n;
                     longDb = Math.Max(longDb, db);
+                    // Posición en planta de cada barra del conjunto (la primera más la traslación de cada posición).
+                    var p0 = main.Evaluate(0.5, true);
+                    for (var i = 0; i < n; i++)
+                    {
+                        try
+                        {
+                            if (!rebar.DoesBarExistAtPosition(i)) continue;
+                            var t = i == 0 || !rebar.IsRebarShapeDriven() ? Transform.Identity : rebar.GetShapeDrivenAccessor().GetBarPositionTransform(i);
+                            positions.Add(Units.ToMm2(t.OfPoint(p0)));
+                        }
+                        catch (Autodesk.Revit.Exceptions.ApplicationException)
+                        {
+                            // posición no disponible: se omite
+                        }
+                    }
                     continue;
                 }
                 // Horizontal con estilo estándar: estribo abierto, grapa o barra de cosido.
@@ -136,7 +157,7 @@ public sealed class RevitGeometryExtractor
             if (isTie) tieDb = Math.Max(tieDb, db);
         }
         if (sets == 0) return null;
-        var info = new ColumnRebarInfo(longCount, longDb, tieDb, sets);
+        var info = new ColumnRebarInfo(longCount, longDb, tieDb, sets) { Positions = positions };
         Notes.Add($"{ElementLabel(column)}: armadura en el modelo: {info.Describe()}.");
         return info;
     }

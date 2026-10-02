@@ -13,14 +13,15 @@ namespace UnionesAcero.Core.Verification;
 public sealed class BarFix
 {
     public required ExistingBar Bar { get; init; }
+    public required BeamJoint Joint { get; init; }
     public required BarLayer Layer { get; init; }
     public required AnchorageDecision Decision { get; init; }
 
     /// <summary>Eje de la barra corregida SIN el gancho, del extremo lejano al vértice en la columna (mm).</summary>
-    public required IReadOnlyList<Vec3> Centerline { get; init; }
+    public required IReadOnlyList<Vec3> Centerline { get; set; }
 
     /// <summary>Eje completo con el tramo del gancho (esquinas vivas), para dibujar.</summary>
-    public required IReadOnlyList<Vec3> FullCenterline { get; init; }
+    public required IReadOnlyList<Vec3> FullCenterline { get; set; }
 
     public HookSpec? EndHook { get; init; }
 
@@ -28,18 +29,30 @@ public sealed class BarFix
     public required Vec3 PlaneNormal { get; init; }
 
     /// <summary>Cota del tramo que entra en la columna (mm).</summary>
-    public required double Elevation { get; init; }
+    public required double Elevation { get; set; }
 
     public required double RequiredLength { get; init; }
-    public required double ProvidedLength { get; init; }
+    public required double ProvidedLength { get; set; }
     public required string Formula { get; init; }
-    public required string Message { get; init; }
+    public required string Message { get; set; }
 
     /// <summary>El extremo que entra en la columna era el inicio de la barra original (se recorre al revés).</summary>
     public bool Reversed { get; init; }
 
     /// <summary>Cuánto se desplaza el extremo de la barra hacia el interior de la columna (mm; negativo = se recorta).</summary>
-    public double EndShift { get; init; }
+    public double EndShift { get; set; }
+
+    /// <summary>Corrimiento lateral aplicado a toda la barra (mm, positivo en el sentido de la lateral de la viga).</summary>
+    public double LateralShift { get; set; }
+
+    /// <summary>Nueva longitud de la distribución del conjunto (mm) si se cambió; null = la original.</summary>
+    public double? SetLength { get; set; }
+
+    /// <summary>Cambio de cota aplicado a toda la barra (mm; negativo = baja).</summary>
+    public double ElevationShift { get; set; }
+
+    /// <summary>Ajustes de detallado aplicados en el nudo (corrimientos, cambios de cota, retrasos del gancho).</summary>
+    public List<string> Adjustments { get; } = new();
 
     public double TotalLength
     {
@@ -81,31 +94,15 @@ public sealed class BarFixer
         }
 
         var layer = check.Layer ?? BarLayer.Top;
-        var pts = (bar.BareCenterline ?? bar.Centerline).ToList();
-        if (pts.Count < 2) { reason = "la barra no tiene geometría de eje."; return null; }
+        if (!TryOrientTowardsColumn(bar, joint, out var pts, out var k, out var reversed))
+        {
+            reason = pts.Count < 2 ? "la barra no tiene geometría de eje." : "la barra no tiene un tramo recto paralelo a la viga que vaya hacia la columna.";
+            return null;
+        }
 
         var u = joint.InwardDirection;
         var v = joint.LateralDirection;
         double Depth(Vec3 p) => (p.XY - joint.ContactPoint).Dot(u);
-
-        // Orientar la polilínea de modo que el extremo que va hacia la columna quede al final.
-        var reversed = Depth(pts[0]) > Depth(pts[^1]);
-        if (reversed) pts.Reverse();
-
-        // Último tramo horizontal paralelo al eje de la viga: es el que se corta y se prolonga.
-        var k = -1;
-        for (var i = pts.Count - 2; i >= 0; i--)
-        {
-            var a = pts[i]; var b = pts[i + 1];
-            var len = a.DistanceTo(b);
-            if (len < 1) continue;
-            if (Math.Abs(b.Z - a.Z) / len >= 0.26) continue;
-            var dir = (b.XY - a.XY).Normalized();
-            if (!GeometryUtil.SameDirection(dir, u, 15)) continue;
-            k = i;
-            break;
-        }
-        if (k < 0) { reason = "la barra no tiene un tramo recto paralelo a la viga que vaya hacia la columna."; return null; }
 
         var start = pts[k];
         var next = pts[k + 1];
@@ -181,10 +178,38 @@ public sealed class BarFixer
 
         return new BarFix
         {
-            Bar = bar, Layer = layer, Decision = decision, Centerline = centerline, FullCenterline = full, EndHook = hook,
+            Bar = bar, Joint = joint, Layer = layer, Decision = decision, Centerline = centerline, FullCenterline = full, EndHook = hook,
             PlaneNormal = Vec3.From(v, 0), Elevation = z, RequiredLength = required, ProvidedLength = provided, Formula = formula,
             Message = msg, Reversed = reversed, EndShift = endShift
         };
+    }
+
+    /// <summary>
+    /// Orienta el eje sin ganchos de la barra de modo que el extremo que entra en la columna quede al
+    /// final, y localiza el último tramo recto paralelo al eje de la viga (índice <paramref name="k"/>
+    /// de su primer vértice). Devuelve false si no hay tal tramo.
+    /// </summary>
+    public static bool TryOrientTowardsColumn(ExistingBar bar, BeamJoint joint, out List<Vec3> pts, out int k, out bool reversed)
+    {
+        pts = (bar.BareCenterline ?? bar.Centerline).ToList();
+        k = -1; reversed = false;
+        if (pts.Count < 2) return false;
+        var u = joint.InwardDirection;
+        double Depth(Vec3 p) => (p.XY - joint.ContactPoint).Dot(u);
+        reversed = Depth(pts[0]) > Depth(pts[^1]);
+        if (reversed) pts.Reverse();
+        for (var i = pts.Count - 2; i >= 0; i--)
+        {
+            var a = pts[i]; var b = pts[i + 1];
+            var len = a.DistanceTo(b);
+            if (len < 1) continue;
+            if (Math.Abs(b.Z - a.Z) / len >= 0.26) continue;
+            var dir = (b.XY - a.XY).Normalized();
+            if (!GeometryUtil.SameDirection(dir, u, 15)) continue;
+            k = i;
+            return true;
+        }
+        return false;
     }
 
     private double RoundUp(double v) => GeometryUtil.RoundUpTo(v, _options.LengthRounding);

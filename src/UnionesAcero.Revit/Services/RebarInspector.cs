@@ -52,10 +52,29 @@ public static class RebarInspector
             var pts = ToPolyline(hooked);
             if (pts.Count < 2) continue;
             var barePts = ToPolyline(bare);
+            double setLength = 0;
+            Vec3? setDir = null;
+            if (positions > 1 && rebar.IsRebarShapeDriven())
+            {
+                try
+                {
+                    var acc = rebar.GetShapeDrivenAccessor();
+                    setLength = Units.ToMm(acc.ArrayLength);
+                    var n = acc.Normal.Normalize();
+                    if (!acc.BarsOnNormalSide) n = -n;
+                    setDir = new Vec3(n.X, n.Y, n.Z);
+                }
+                catch (Autodesk.Revit.Exceptions.ApplicationException)
+                {
+                    setLength = 0; setDir = null;
+                }
+            }
             return new ExistingBar(rebar.Id.Value, beamName, db, pts, i > 0 ? $"posición {i + 1}" : null)
             {
                 BareCenterline = barePts.Count >= 2 ? barePts : pts,
-                Count = positions
+                Count = positions,
+                SetLength = setLength,
+                SetDirection = setDir
             };
         }
         return null;

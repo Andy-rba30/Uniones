@@ -31,7 +31,7 @@ public sealed record HookSpec(HookAngle Angle, double Extension, Vec3 Direction,
 /// Grupo de barras iguales (misma capa, misma viga) listo para dibujar: una barra prototipo
 /// más una regla de repetición lateral.
 /// </summary>
-public sealed class BarGroup
+public sealed record BarGroup
 {
     public required string BeamName { get; init; }
     public long? BeamSourceId { get; init; }
@@ -70,6 +70,9 @@ public sealed class BarGroup
     public required string Formula { get; init; }
 
     public string Comment { get; init; } = string.Empty;
+
+    /// <summary>Ajustes de detallado aplicados en el nudo (corrimientos, cambios de cota, retrasos del gancho).</summary>
+    public List<string> Adjustments { get; init; } = new();
 
     public double TotalLength
     {

@@ -37,7 +37,8 @@ mismo estilo que los add-ins de columnas y muros). Seleccionas una o varias colu
 - **Columnas seleccionadas**: forma detectada (rectangular, en L, en T, en cruz…), tamaño, armadura
   modelada en la columna, número de vigas y el resumen del plan (barras nuevas, correcciones, existentes
   que cumplen, insuficientes); en rojo, el motivo si no se puede armar. Clic en una fila para ver su nudo.
-- **Vigas de la columna seleccionada**: una fila por viga: incluirla o no, tipo de barra y número de
+- **Vigas de la columna seleccionada**: una fila por viga: incluirla o no, marcarla como *Ppal.*
+  (principal en los cruces del nudo), tipo de barra y número de
   barras de cada capa (solo para las capas sin barras modeladas; vacío / 0 = valores generales), y el
   **resultado de cada capa**: `NUEVAS 3Ø16 gancho 90° (req. 272 / prov. 350)` en verde, `existentes 3Ø16
   cumplen` en verde, `existentes 3Ø16 NO cumplen → corregir: gancho 90°` en ámbar, o `INSUFICIENTE` en
@@ -50,7 +51,9 @@ mismo estilo que los add-ins de columnas y muros). Seleccionas una o varias colu
 - **Barras y gancho**: tipo de barra (RebarBarType) y cantidad por capa, tipo de gancho de 90°.
 - **Recubrimientos y detallado**: recubrimientos y estribos de columna y viga (si el modelo no los
   define), llevar las barras hasta la cara lejana del núcleo o solo la longitud requerida, extensión
-  dentro de la viga, holgura, desplazamiento automático de capas que se cruzan, redondeo.
+  dentro de la viga, holgura, redondeo, y las reglas de detallado del nudo (desplazar capas que se
+  cruzan, correr barras para pasar por dentro de las verticales, retrasar ganchos en la misma esquina,
+  empalmar barras pasantes fuera del nudo, varilla comercial).
 - **Planta del nudo** (vista desde arriba, X a la derecha, Y arriba): la sección real de la columna con
   el núcleo a trazos, las vigas que llegan (las no conectadas, a trazos rojos con el motivo en el
   tooltip) y las barras: nuevas (superiores en rojo oscuro, inferiores a trazos naranja, pasantes en
@@ -87,6 +90,37 @@ que se mostraba *sin obstrucción* y, como las barras nuevas, se muestra sin obs
 (en Revit ese estado es por barra y por vista y no se copia solo; sin él, una barra nueva queda oculta
 dentro del hormigón en las vistas 3D sombreadas y parece borrada).
 
+## Detallado del nudo como en obra
+
+Una vez decidido el anclaje de cada capa, el plugin resuelve los choques que el fierrero resolvería al
+armar, sobre las barras nuevas, las corregidas y, como obstáculos fijos, las existentes que se conservan:
+
+1. **Las barras de la viga pasan por dentro de las verticales de la columna.** Se leen las posiciones de
+   las barras verticales de la columna (si no hay, se supone una en cada esquina del núcleo). La barra de
+   viga que coincide con una vertical se corre en planta hacia el eje de la viga, toda ella, hasta dejar
+   la separación libre configurada (25 mm). Si el ancho de la viga no da, se admite el contacto con la
+   vertical y, en último caso, con las otras barras de la viga, y se avisa. Un conjunto existente se corre
+   como conjunto (su primera barra y su longitud de reparto).
+2. **Ganchos en la misma esquina.** Cuando el gancho de una viga atravesaría las barras o los ganchos de
+   la otra, el extremo de la viga secundaria retrocede, sin bajar del anclaje requerido, hasta que queda
+   libre. Si la secundaria no puede, cede la principal; si ninguna puede con 25 mm libres se prueba en
+   contacto; y si tampoco, se avisa para resolverlo en obra.
+3. **Cruces a la misma cota.** Si tras lo anterior las barras de dos vigas aún se cruzan en planta a la
+   misma cota, la capa de la viga secundaria baja (superior) o sube (inferior) un diámetro más 25 mm
+   para pasar por debajo o por encima de la principal.
+4. **Barras pasantes ya modeladas (vigas colineales).** No se anclan las dos en el nudo: la barra de la
+   viga principal se hace continua a través de la columna y se empalma por traslape con la de la viga
+   opuesta fuera del nudo, a partir de 2h de la cara (ACI 318-19 18.6.3.3, E.060 21.5.2.3), con una
+   bayoneta de pendiente 1:6 justo antes del traslape; la barra opuesta se corta en el inicio del
+   traslape. lst = traslape clase B (con diámetros distintos, el mayor de ld del grueso y lst del fino).
+   Se avisa si la barra continua supera la varilla comercial (9 m) o si la opuesta es demasiado corta.
+
+**Viga principal**: la marcada como *Ppal.* en la tabla de vigas; sin marcar, la de mayor peralte, luego
+mayor ancho, luego barras de mayor diámetro y, por último, la primera de la lista (para los ganchos, a
+igualdad, cede la viga con más holgura de anclaje). Cada ajuste aparece en la tabla de vigas, en los
+esquemas y en el comentario de la barra creada; lo que no se pudo resolver sale como aviso. Todo esto se
+puede desactivar en *Recubrimientos y detallado*.
+
 ## Cómo decide el anclaje
 
 Para cada viga que llega a la columna:
@@ -101,8 +135,8 @@ Para cada viga que llega a la columna:
 4. Si la profundidad útil ≥ `ld`: **anclaje recto**. Si ≥ `ldh`: **gancho a 90°** (superiores hacia abajo,
    inferiores hacia arriba; si la columna termina en la viga, ambos hacia abajo). Si no cabe ninguno:
    **INSUFICIENTE** y se indica cuánto falta.
-5. Si dos vigas se cruzan dentro del nudo con las capas a la misma cota, la segunda capa se desplaza
-   automáticamente para que una pase por encima de la otra (configurable).
+5. Después se aplican las reglas de detallado del nudo (ver arriba): verticales de la columna, ganchos
+   en la misma esquina y cruces a la misma cota.
 6. Se avisa si la viga sobresale de la cara de la columna, llega oblicua, no la toca, o si dos vigas llegan
    por la misma cara en la misma posición (viga duplicada).
 
@@ -114,8 +148,8 @@ UnionesAcero.sln
 │   ├─ Geometry/              Vec2/Vec3, Segment2D, Polygon2D (recorte de rectas, offset interior…)
 │   ├─ Model/                 ColumnSection, BeamSection, Materials, JointOptions
 │   ├─ Codes/                 IAnchorageCode: Aci318Code, Nsr10Code, E060Code, Eurocode2Code
-│   ├─ Analysis/              JointAnalyzer → JointAnalysis (BeamJoint, LayerResult, BarGroup)
-│   ├─ Verification/          ExistingBarChecker (verifica barras ya modeladas), BarFixer (propone su corrección)
+│   ├─ Analysis/              JointAnalyzer → JointAnalysis (BeamJoint, LayerResult, BarGroup); JointDetailer (choques en el nudo)
+│   ├─ Verification/          ExistingBarChecker (verifica barras ya modeladas), BarFixer (propone su corrección), SpliceResolver (empalme de pasantes)
 │   └─ Reporting/             ReportFormatter (informes en texto)
 ├─ src/UnionesAcero.Revit     Adaptador Revit 2027 (net10.0-windows)
 │   ├─ Ribbon/ArbaRibbon.cs   Pestaña ARBA, panel y desplegable Acero (compartidos con los otros add-ins)
@@ -123,7 +157,7 @@ UnionesAcero.sln
 │   ├─ Services/              Lectura de geometría (columna, vigas, barras existentes), RebarBuilder
 │   ├─ UI/                    JointWindow, PlanPreview, ElevationPreview, RevitTheme (WPF en código)
 │   └─ config.json            Valores por defecto de la ventana
-└─ tests/UnionesAcero.Core.Tests   xUnit (42 pruebas: geometría, normas, analizador, verificador, corrector)
+└─ tests/UnionesAcero.Core.Tests   xUnit (49 pruebas: geometría, normas, analizador, verificador, corrector, detallado, empalmes)
 ```
 
 El núcleo se puede reutilizar desde otro CAD (AutoCAD, Tekla) escribiendo solo otro adaptador.
@@ -166,7 +200,8 @@ dotnet test
   que no cumplen); para las capas sin barras se usan el tipo y la cantidad de la ventana (o, si se marca
   la casilla, los de las barras del modelo).
 - Armadura de la columna: si tiene estribos modelados se usa su diámetro para el núcleo confinado; si no,
-  el de la configuración.
+  el de la configuración. Las posiciones de sus barras verticales se usan para correr las barras de las
+  vigas; si no hay, se supone una vertical en cada esquina del núcleo.
 
 ## Hoja de ruta
 
@@ -176,7 +211,9 @@ dotnet test
 ## Limitaciones y cosas a validar en obra/oficina
 
 - Es una herramienta de **detallado geométrico**: no diseña el refuerzo ni verifica cortante en el nudo,
-  cuantías ni confinamiento. El ingeniero responsable debe revisar los resultados.
+  cuantías ni confinamiento. El ingeniero responsable debe revisar los resultados. En particular, bajar
+  una capa para cruzar reduce el brazo de palanca de esa viga, y los avisos de "en contacto" o "no cabe"
+  indican nudos congestionados que conviene revisar (menos barras, paquetes o mayor sección).
 - Las fórmulas están implementadas en MPa con los factores habituales (ψt, ψe, ψg, ψc, λ; α1, α2 en EC2).
   Los casos especiales (barras con cabeza, paquetes de barras, ganchos de 180°) no están cubiertos.
 - La orientación del gancho se calcula con la convención `RebarTerminationOrientation` de la API 2026+

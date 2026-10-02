@@ -31,9 +31,9 @@ public sealed class LayerPlan
     public required BarLayer Layer { get; init; }
     public required LayerAction Action { get; init; }
     /// <summary>Resultado del analizador para la capa (anclaje calculado con las barras elegidas).</summary>
-    public LayerResult? Result { get; init; }
+    public LayerResult? Result { get; set; }
     /// <summary>Grupo de barras nuevas a crear (solo con <see cref="LayerAction.CreateNew"/>).</summary>
-    public BarGroup? NewGroup { get; init; }
+    public BarGroup? NewGroup { get; set; }
     /// <summary>Verificación de cada conjunto de barras existentes de la capa.</summary>
     public List<BarCheckResult> Existing { get; } = new();
     /// <summary>Correcciones propuestas (conjunto existente → barra corregida).</summary>
@@ -59,6 +59,12 @@ public sealed class BeamItem
     public (double TopDb, int TopN, double BottomDb, int BottomN)? ModelBars { get; init; }
 
     public bool Include { get; set; } = true;
+
+    /// <summary>
+    /// Viga principal en los cruces del nudo: conserva la cota de sus capas y la posición de sus ganchos;
+    /// las demás ceden. Sin marcar, decide el peralte, el ancho, el diámetro y el orden.
+    /// </summary>
+    public bool Principal { get; set; }
 
     /// <summary>Elecciones propias de esta viga (vacío / 0 = valores generales).</summary>
     public string TopBarTypeName { get; set; } = "";
@@ -107,6 +113,8 @@ public sealed class ColumnItem
     public int FixCount => ActivePlans.Sum(p => p.Fixes.Count);
     public int KeptCount => ActivePlans.Sum(p => p.ExistingOk);
     public int InsufficientCount => ActivePlans.Count(p => p.Action == LayerAction.Insufficient) + ActivePlans.Sum(p => p.Unfixable.Count);
+    /// <summary>Ajustes de detallado en el nudo (corrimientos, cotas, ganchos retrasados) sobre barras nuevas y corregidas.</summary>
+    public int AdjustmentCount => ActivePlans.Sum(p => (p.Action == LayerAction.CreateNew ? p.NewGroup?.Adjustments.Count ?? 0 : 0) + p.Fixes.Sum(f => f.Fix.Adjustments.Count));
     public bool HasWork => ActivePlans.Any(p => (p.Action == LayerAction.CreateNew && p.NewGroup != null) || p.Fixes.Count > 0);
 
     public static string ShapeName(Polygon2D p)
@@ -146,6 +154,8 @@ public sealed class ColumnItem
         if (nw > 0) parts.Add($"{nw} grupo(s) de barras nuevas");
         if (fx > 0) parts.Add($"{fx} conjunto(s) existente(s) a corregir");
         if (kp > 0) parts.Add($"{kp} existente(s) cumplen");
+        var adj = AdjustmentCount;
+        if (adj > 0) parts.Add($"{adj} ajuste(s) de detallado en el nudo");
         var verify = ActivePlans.Where(p => p.Action == LayerAction.VerifyOnly).Sum(p => p.ExistingFail);
         if (verify > 0) parts.Add($"{verify} existente(s) NO cumplen (solo verificación)");
         if (ins > 0) parts.Add($"{ins} INSUFICIENTE(S)");
@@ -201,6 +211,7 @@ public static class JointSession
             Cover = item.Section.Cover > 0 ? item.Section.Cover : settings.ColumnCoverMm,
             TieDiameter = item.ModelRebar is { TieDb: > 0 } mr ? mr.TieDb : settings.ColumnTieDiameterMm,
             LongitudinalBarDiameter = item.Section.LongitudinalBarDiameter,
+            LongitudinalBarPositions = item.Section.LongitudinalBarPositions,
             TopElevation = item.Section.TopElevation,
             BottomElevation = item.Section.BottomElevation,
             SourceId = item.Section.SourceId
@@ -233,11 +244,13 @@ public static class JointSession
                 StirrupDiameter = settings.BeamStirrupDiameterMm,
                 TopBarDiameter = topDb, TopBarCount = topN, TopBarTypeName = topType,
                 BottomBarDiameter = botDb, BottomBarCount = botN, BottomBarTypeName = botType,
-                SourceId = b.Base.SourceId
+                SourceId = b.Base.SourceId,
+                CrossingPriority = b.Principal ? 1 : 0
             });
         }
 
-        var analysis = new JointAnalyzer(options).Analyze(column, beams);
+        // Sin resolver choques todavía: se hace al final, con las correcciones y las barras existentes.
+        var analysis = new JointAnalyzer(options).Analyze(column, beams, resolveClashes: false);
         item.Analysis = analysis;
         var checker = new ExistingBarChecker(options);
         var fixer = new BarFixer(options);
@@ -251,7 +264,92 @@ public static class JointSession
                 : new List<BarCheckResult>();
             b.Plans = options.Layers.Select(layer => PlanLayer(b, layer, analysis, mode, fixer)).ToList();
         }
+
+        if (options.SplicePassThroughBars && mode == ExistingBarsAction.Fix) ApplySplices(item, analysis, options);
+        ApplyDetailing(item, analysis, options);
         return analysis;
+    }
+
+    /// <summary>
+    /// Barras ya modeladas en dos vigas colineales: la de la viga principal se hace continua a través del
+    /// nudo y se empalma fuera de él con la de la opuesta, que se corta en el inicio del traslape. Sustituye
+    /// a cualquier otra corrección de esas barras (y convierte en corrección las que cumplían).
+    /// </summary>
+    private static void ApplySplices(ColumnItem item, JointAnalysis analysis, JointOptions options)
+    {
+        var candidates = new List<SpliceCandidate>();
+        foreach (var b in item.Beams.Where(b => b.Include && b.Joint is { Connected: true, OppositeBeam: not null }))
+            foreach (var c in b.Checks.Where(c => c.Layer.HasValue && c.Status != CheckStatus.NotApplicable))
+            {
+                var entry = b.ExistingBars.FirstOrDefault(e => e.Bar.Id == c.Id);
+                if (entry.Rebar != null) candidates.Add(new SpliceCandidate(b.Joint!, c.Layer!.Value, entry.Bar));
+            }
+        if (candidates.Count == 0) return;
+
+        var splice = new SpliceResolver(options).Resolve(analysis, candidates);
+        foreach (var d in splice.Diagnostics)
+        {
+            var j = analysis.Joints.FirstOrDefault(j => j.Beam.Name == d.Element);
+            if (j != null) j.Diagnostics.Add(d); else analysis.Diagnostics.Add(d);
+        }
+        if (splice.Fixes.Count == 0) return;
+
+        foreach (var b in item.Beams)
+        {
+            for (var i = 0; i < b.Plans.Count; i++)
+            {
+                var plan = b.Plans[i];
+                var here = splice.Fixes.Where(f => ReferenceEquals(f.Joint, b.Joint) && f.Layer == plan.Layer).ToList();
+                if (here.Count == 0) continue;
+                var np = new LayerPlan { Layer = plan.Layer, Action = LayerAction.FixExisting, Result = plan.Result };
+                np.Existing.AddRange(plan.Existing);
+                np.Fixes.AddRange(plan.Fixes.Where(f => !splice.ReplacedBarIds.Contains(f.Bar.Id)));
+                foreach (var f in here)
+                {
+                    var e = b.ExistingBars.FirstOrDefault(e => e.Bar.Id == f.Bar.Id);
+                    if (e.Rebar != null) np.Fixes.Add((e.Rebar, e.Bar, f));
+                }
+                np.Unfixable.AddRange(plan.Unfixable.Where(u => !splice.ReplacedBarIds.Contains(u.Bar.Id)));
+                b.Plans[i] = np;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reglas de detallado del nudo (paso por dentro de las verticales de la columna, ganchos en la misma
+    /// esquina, cruces a la misma cota) sobre las barras nuevas, las corregidas y, como obstáculos fijos,
+    /// las existentes que se conservan. Después refresca en cada plan el resultado de su capa.
+    /// </summary>
+    private static void ApplyDetailing(ColumnItem item, JointAnalysis analysis, JointOptions options)
+    {
+        var active = item.Beams.Where(b => b.Include && b.Joint is { Connected: true }).ToList();
+        var fixes = active.SelectMany(b => b.Plans.SelectMany(p => p.Fixes.Select(f => f.Fix))).ToList();
+        var kept = new List<KeptBar>();
+        foreach (var b in active)
+            foreach (var p in b.Plans)
+            {
+                var fixedIds = p.Fixes.Select(f => f.Bar.Id).ToHashSet();
+                foreach (var c in p.Existing)
+                {
+                    if (fixedIds.Contains(c.Id)) continue;
+                    if (c.Status != CheckStatus.Ok && p.Action != LayerAction.VerifyOnly) continue;
+                    var e = b.ExistingBars.FirstOrDefault(e => e.Bar.Id == c.Id);
+                    if (e.Rebar != null) kept.Add(new KeptBar(b.Joint!, p.Layer, e.Bar));
+                }
+            }
+
+        new JointDetailer(options).Apply(analysis, fixes, kept,
+            (j, layer) => active.Any(b => ReferenceEquals(b.Joint, j) && b.Plan(layer)?.Action == LayerAction.CreateNew));
+
+        // Los resultados por capa pueden haberse sustituido (cota, extremo, reparto): refrescar los planes.
+        foreach (var b in active)
+            foreach (var p in b.Plans)
+            {
+                var lr = b.Joint!.Layers.FirstOrDefault(l => l.Layer == p.Layer);
+                if (lr == null) continue;
+                p.Result = lr;
+                if (p.Action == LayerAction.CreateNew) p.NewGroup = lr.Group;
+            }
     }
 
     private static LayerPlan PlanLayer(BeamItem b, BarLayer layer, JointAnalysis analysis, ExistingBarsAction mode, BarFixer fixer)

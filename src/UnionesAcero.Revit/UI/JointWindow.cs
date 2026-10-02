@@ -35,6 +35,8 @@ public sealed class JointWindow : Window
     private TextBox _fy = null!, _fc = null!, _topN = null!, _botN = null!;
     private CheckBox _seismic = null!, _light = null!, _epoxy = null!, _infer = null!, _embedFar = null!, _stagger = null!, _highlight = null!;
     private TextBox _colCover = null!, _colTie = null!, _beamCover = null!, _beamStirrup = null!, _extension = null!, _clearance = null!, _rounding = null!;
+    private TextBox _colBarClear = null!, _commercial = null!;
+    private CheckBox _clash = null!, _legs = null!, _splice = null!;
     private TextBlock _message = null!, _previewCaption = null!, _beamsCaption = null!, _existingText = null!, _barsHint = null!;
     private Button _buildButton = null!;
     private Grid _beamsGrid = null!;
@@ -196,12 +198,12 @@ public sealed class JointWindow : Window
                     return;
                 }
                 _beamsCaption.Text = "Por viga: resultado de cada capa. Tipo y número de barras solo se usan para las capas SIN barras modeladas (vacío / 0 = valores generales). Clic en el nombre para ver su alzado.";
-                foreach (var w in new[] { 24.0, 110, 150, 42, 150, 42 })
+                foreach (var w in new[] { 24.0, 36, 110, 150, 42, 150, 42 })
                     _beamsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w) });
                 _beamsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
                 _beamsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                var headers = new[] { "", "Viga", "Superiores", "n", "Inferiores", "n", "Resultado sup. / inf." };
+                var headers = new[] { "", "Ppal.", "Viga", "Superiores", "n", "Inferiores", "n", "Resultado sup. / inf." };
                 for (var c = 0; c < headers.Length; c++)
                 {
                     var tb = new TextBlock { Text = headers[c], Foreground = RevitTheme.Muted, Margin = Pad };
@@ -219,30 +221,36 @@ public sealed class JointWindow : Window
                     include.Unchecked += (_, _) => { captured.Include = false; Refresh(); };
                     Place(include, row, 0);
 
+                    var principal = new CheckBox { IsChecked = b.Principal, Margin = Pad, VerticalAlignment = VerticalAlignment.Center,
+                        ToolTip = "Viga principal en los cruces del nudo: conserva la cota de sus capas y la posición de sus ganchos; las demás ceden. Sin marcar, decide el peralte, luego el ancho, el diámetro y el orden." };
+                    principal.Checked += (_, _) => { captured.Principal = true; Refresh(); };
+                    principal.Unchecked += (_, _) => { captured.Principal = false; Refresh(); };
+                    Place(principal, row, 1);
+
                     var name = new TextBlock { Text = b.Name, Margin = Pad, VerticalAlignment = VerticalAlignment.Center, Cursor = Cursors.Hand, TextTrimming = TextTrimming.CharacterEllipsis, ToolTip = $"{b.Name}: {b.Base.Width:0} x {b.Base.Depth:0} mm; barras en el modelo: {b.ModelBarsText}" };
                     if (b.ModelBars.HasValue) name.Foreground = RevitTheme.Text; else name.Foreground = RevitTheme.Muted;
                     name.MouseLeftButtonDown += (_, _) => { _selectedBeam = captured; Refresh(); };
-                    Place(name, row, 1);
+                    Place(name, row, 2);
 
                     var topType = TypeCombo(b.TopBarTypeName, withGeneral: true);
                     topType.SelectionChanged += (_, _) => { if (!_refreshingBeams) { captured.TopBarTypeName = TypeOf(topType, true); Refresh(); } };
-                    Place(topType, row, 2);
+                    Place(topType, row, 3);
                     var topN = CountBox(b.TopBarCount);
                     topN.TextChanged += (_, _) => { if (!_refreshingBeams) { captured.TopBarCount = int.TryParse(topN.Text.Trim(), out var n) ? Math.Max(0, n) : 0; Refresh(); } };
-                    Place(topN, row, 3);
+                    Place(topN, row, 4);
                     var botType = TypeCombo(b.BottomBarTypeName, withGeneral: true);
                     botType.SelectionChanged += (_, _) => { if (!_refreshingBeams) { captured.BottomBarTypeName = TypeOf(botType, true); Refresh(); } };
-                    Place(botType, row, 4);
+                    Place(botType, row, 5);
                     var botN = CountBox(b.BottomBarCount);
                     botN.TextChanged += (_, _) => { if (!_refreshingBeams) { captured.BottomBarCount = int.TryParse(botN.Text.Trim(), out var n) ? Math.Max(0, n) : 0; Refresh(); } };
-                    Place(botN, row, 5);
+                    Place(botN, row, 6);
 
                     var status = new StackPanel { Orientation = Orientation.Vertical, Margin = Pad, VerticalAlignment = VerticalAlignment.Center };
                     var top = new TextBlock { FontSize = 11 };
                     var bottom = new TextBlock { FontSize = 11 };
                     status.Children.Add(top);
                     status.Children.Add(bottom);
-                    Place(status, row, 6);
+                    Place(status, row, 7);
                     _beamRows.Add((b, top, bottom, new Control[] { topType, topN }, new Control[] { botType, botN }));
                     row++;
                 }
@@ -305,7 +313,7 @@ public sealed class JointWindow : Window
             {
                 var g = p.NewGroup;
                 var bars = g != null ? $"{g.Count}Ø{g.Diameter:0} " : "";
-                text.Text = prefix + "NUEVAS " + bars + Req(l.Decision, newReq, l.Provided);
+                text.Text = prefix + "NUEVAS " + bars + Req(l.Decision, newReq, l.Provided) + Adjust(g?.Adjustments);
                 text.Foreground = RevitTheme.Ok;
                 break;
             }
@@ -316,7 +324,11 @@ public sealed class JointWindow : Window
             case LayerAction.FixExisting:
             {
                 var f = p.Fixes[0].Fix;
-                text.Text = prefix + "existentes " + ExistingBars(b, p) + " NO cumplen → corregir: " + Req(f.Decision, f.RequiredLength, f.ProvidedLength) +
+                var what = f.Decision == AnchorageDecision.PassThrough
+                    ? $"empalme fuera del nudo (lst = {f.RequiredLength:0})"
+                    : Req(f.Decision, f.RequiredLength, f.ProvidedLength);
+                text.Text = prefix + "existentes " + ExistingBars(b, p) + (f.Decision == AnchorageDecision.PassThrough ? " → " : " NO cumplen → corregir: ") + what +
+                            Adjust(f.Adjustments) +
                             (p.Fixes.Count > 1 ? $" ({p.Fixes.Count} conjuntos)" : "") +
                             (p.Unfixable.Count > 0 ? $"; {p.Unfixable.Count} sin corrección posible" : "") +
                             (p.ExistingOk > 0 ? $"; {p.ExistingOk} ya cumplen" : "");
@@ -340,11 +352,25 @@ public sealed class JointWindow : Window
                 text.Foreground = RevitTheme.Hint;
                 break;
         }
+        var adjustments = (p.Action == LayerAction.CreateNew ? p.NewGroup?.Adjustments : null) ?? new List<string>();
         text.ToolTip = string.Join(Environment.NewLine,
             p.Existing.Select(c => $"[{c.Id}] {c.Message}")
              .Concat(p.Unfixable.Select(u => $"[{u.Bar.Id}] sin corrección: {u.Reason}"))
              .Concat(p.Fixes.Select(f => $"[{f.Bar.Id}] {f.Fix.Message}"))
+             .Concat(adjustments.Select(a => "Ajuste en el nudo: " + a))
+             .Concat(j.Diagnostics.Where(d => d.Message.StartsWith($"Capa {JointAnalyzer.LayerName(layer)}", StringComparison.Ordinal)).Select(d => (d.Severity == Severity.Warning ? "⚠ " : "• ") + d.Message))
              .DefaultIfEmpty(l.Formula));
+    }
+
+    /// <summary>Resumen corto de los ajustes de detallado de una capa para la tabla.</summary>
+    private static string Adjust(IReadOnlyList<string>? adjustments)
+    {
+        if (adjustments == null || adjustments.Count == 0) return "";
+        return " · " + string.Join(" · ", adjustments.Select(a =>
+        {
+            var cut = a.IndexOf(" (", StringComparison.Ordinal);
+            return cut > 0 ? a[..cut] : a;
+        }));
     }
 
     private static string ExistingBars(BeamItem b, LayerPlan p)
@@ -474,7 +500,17 @@ public sealed class JointWindow : Window
         _clearance = NumBox(_cfg.HookClearanceMm);
         AddRow(grid, r++, "Holgura gancho–estribo (mm):", _clearance, null);
         _stagger = new CheckBox { Content = "Desplazar la capa cuando las barras de dos vigas se cruzan en el nudo", IsChecked = _cfg.AutoStaggerCrossingLayers, Margin = Pad };
-        AddRow(grid, r++, "", _stagger, "Si no, solo se avisa.");
+        AddRow(grid, r++, "", _stagger, "La viga secundaria (menor peralte, ancho, diámetro; o la no marcada como principal) baja su capa superior y sube la inferior un diámetro más 25 mm. Si no, solo se avisa.");
+        _clash = new CheckBox { Content = "Correr las barras de la viga para pasar por dentro de las verticales de la columna", IsChecked = _cfg.ResolveColumnBarClash, Margin = Pad };
+        AddRow(grid, r++, "", _clash, "Como en obra: la barra que coincide con una vertical de la columna se corre hacia el eje de la viga (toda la barra, para que siga recta). Si no cabe la separación libre, queda en contacto y se avisa.");
+        _colBarClear = NumBox(_cfg.ColumnBarClearanceMm);
+        AddRow(grid, r++, "Separación viga–vertical (mm):", _colBarClear, "Separación libre deseada entre una barra de viga y una vertical de columna.");
+        _legs = new CheckBox { Content = "Retrasar el gancho de la viga secundaria si choca con la principal en la misma esquina", IsChecked = _cfg.ResolveHookLegClash, Margin = Pad };
+        AddRow(grid, r++, "", _legs, "El extremo de la viga secundaria retrocede, sin bajar del anclaje requerido, hasta que su gancho no atraviesa las barras ni los ganchos de la principal. Si la secundaria no puede, cede la principal; si ninguna puede, se avisa.");
+        _splice = new CheckBox { Content = "Barras pasantes ya modeladas: continuar la principal y empalmar fuera del nudo (2h + lst)", IsChecked = _cfg.SplicePassThroughBars, Margin = Pad };
+        AddRow(grid, r++, "", _splice, "Dos vigas colineales con barras modeladas: la de la viga principal se hace continua a través del nudo, con bayoneta 1:6, y se traslapa (clase B) con la de la opuesta a partir de 2h de la cara; la opuesta se corta en el inicio del traslape.");
+        _commercial = NumBox(_cfg.CommercialBarLengthMm);
+        AddRow(grid, r++, "Varilla comercial (mm):", _commercial, "Se avisa cuando una barra continua supera esta longitud.");
         _rounding = NumBox(_cfg.LengthRoundingMm);
         AddRow(grid, r++, "Redondeo de longitudes (mm):", _rounding, null);
         _highlight = new CheckBox { Content = "Al armar, marcar en rojo en la vista activa las barras existentes que no cumplen", IsChecked = _cfg.HighlightFailingExistingBars, Margin = Pad };
@@ -649,6 +685,11 @@ public sealed class JointWindow : Window
         c.ExtensionIntoBeamMm = string.IsNullOrWhiteSpace(_extension.Text) ? null : ReadNum(_extension, "extensión en la viga", 0, errors);
         c.HookClearanceMm = ReadNum(_clearance, "holgura", 0, errors);
         c.AutoStaggerCrossingLayers = _stagger.IsChecked == true;
+        c.ResolveColumnBarClash = _clash.IsChecked == true;
+        c.ColumnBarClearanceMm = ReadNum(_colBarClear, "separación viga–vertical", 0, errors);
+        c.ResolveHookLegClash = _legs.IsChecked == true;
+        c.SplicePassThroughBars = _splice.IsChecked == true;
+        c.CommercialBarLengthMm = ReadNum(_commercial, "varilla comercial", 1000, errors);
         c.LengthRoundingMm = ReadNum(_rounding, "redondeo", 0, errors);
         c.HighlightFailingExistingBars = _highlight.IsChecked == true;
         c.Normalized();

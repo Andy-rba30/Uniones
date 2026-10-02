@@ -14,8 +14,14 @@ public sealed record ExistingBar(long Id, string BeamName, double Diameter, IRea
 {
     public IReadOnlyList<Vec3>? BareCenterline { get; init; }
 
-    /// <summary>Número de barras del conjunto en el modelo (informativo).</summary>
+    /// <summary>Número de barras del conjunto en el modelo.</summary>
     public int Count { get; init; } = 1;
+
+    /// <summary>Longitud de la distribución del conjunto (mm, entre ejes de la primera y la última barra). 0 si es una sola barra.</summary>
+    public double SetLength { get; init; }
+
+    /// <summary>Dirección unitaria en la que se reparten las barras del conjunto desde la primera. Null si es una sola barra.</summary>
+    public Vec3? SetDirection { get; init; }
 }
 
 public enum CheckStatus

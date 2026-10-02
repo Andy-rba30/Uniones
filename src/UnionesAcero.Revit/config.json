@@ -23,6 +23,11 @@
   "autoStaggerCrossingLayers": true,
   "extensionIntoBeamMm": null,
   "hookClearanceMm": 0,
+  "resolveColumnBarClash": true,
+  "columnBarClearanceMm": 25,
+  "resolveHookLegClash": true,
+  "splicePassThroughBars": true,
+  "commercialBarLengthMm": 9000,
   "lengthRoundingMm": 10,
   "beamSearchDistanceMm": 300,
   "highlightFailingExistingBars": true

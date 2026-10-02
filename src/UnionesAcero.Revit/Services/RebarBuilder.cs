@@ -218,7 +218,11 @@ public sealed class RebarBuilder
         }
 
         if (positions > 1 && arrayLength > 1e-9)
+        {
+            // Si el detallado corrió las barras para pasar por dentro de las verticales de la columna, el conjunto se acorta.
+            if (fix.SetLength is { } newLen && newLen > 0) arrayLength = Units.ToFt(newLen);
             rebar.GetShapeDrivenAccessor().SetLayoutAsFixedNumber(positions, arrayLength, onNormalSide, includeFirstBar: true, includeLastBar: true);
+        }
 
         // La visibilidad "sin obstrucción" es por barra y por vista y NO se hereda: una barra nueva
         // queda oculta dentro del hormigón en las vistas 3D sombreadas, así que al sustituir la

@@ -48,6 +48,13 @@ public sealed class BeamSection
     /// <summary>Identificador en el modelo de origen (ElementId en Revit).</summary>
     public long? SourceId { get; init; }
 
+    /// <summary>
+    /// Jerarquía en los cruces del nudo: la viga con mayor valor es la principal (conserva la cota de
+    /// sus capas y la posición de sus ganchos); a igualdad decide el peralte, el ancho, el diámetro de
+    /// las barras y, por último, el orden de llegada. 0 = sin preferencia; 1 = elegida como principal.
+    /// </summary>
+    public int CrossingPriority { get; init; }
+
     public Segment2D Axis => new(AxisStart, AxisEnd);
 
     public double BarDiameter(BarLayer layer) => layer == BarLayer.Top ? TopBarDiameter : BottomBarDiameter;

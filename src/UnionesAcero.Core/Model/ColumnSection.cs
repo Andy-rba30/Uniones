@@ -35,6 +35,23 @@ public sealed class ColumnSection
     /// <summary>Identificador en el modelo de origen (ElementId en Revit).</summary>
     public long? SourceId { get; init; }
 
+    /// <summary>
+    /// Posición en planta (mm) de cada barra longitudinal de la columna, si se leyó del modelo.
+    /// Vacío = desconocida.
+    /// </summary>
+    public IReadOnlyList<Vec2> LongitudinalBarPositions { get; init; } = Array.Empty<Vec2>();
+
     /// <summary>Contorno interior del estribo (núcleo confinado aproximado).</summary>
     public Polygon2D CorePolygon => Outline.InwardOffset(Cover + TieDiameter);
+
+    /// <summary>
+    /// Verticales de la columna con las que no deben chocar las barras de las vigas: las del modelo si
+    /// se leyeron; si no, se supone una barra en cada esquina del núcleo (toda columna las tiene).
+    /// </summary>
+    public IReadOnlyList<Vec2> BarPositionsForClearance()
+    {
+        if (LongitudinalBarPositions.Count > 0) return LongitudinalBarPositions;
+        try { return CorePolygon.InwardOffset(LongitudinalBarDiameter / 2).Vertices; }
+        catch (ArgumentException) { return Array.Empty<Vec2>(); }
+    }
 }

@@ -46,6 +46,37 @@ public sealed record JointOptions
     /// <summary>Separación libre mínima entre barras que se cruzan (mm).</summary>
     public double CrossingClearance { get; init; } = 25;
 
+    /// <summary>
+    /// Correr en planta las barras de la viga que coinciden con las verticales de la columna, hacia
+    /// el eje de la viga, para que pasen por dentro de ellas (como en obra).
+    /// </summary>
+    public bool ResolveColumnBarClash { get; init; } = true;
+
+    /// <summary>
+    /// Separación libre deseada entre una barra de viga y una vertical de columna (mm). Si no cabe en
+    /// el ancho de la viga se admite el contacto y se avisa.
+    /// </summary>
+    public double ColumnBarClearance { get; init; } = 25;
+
+    /// <summary>
+    /// En la misma esquina, retrasar el extremo de la viga secundaria para que su gancho no atraviese
+    /// las barras ni los ganchos de la viga principal (manteniendo el anclaje requerido).
+    /// </summary>
+    public bool ResolveHookLegClash { get; init; } = true;
+
+    /// <summary>
+    /// Barras ya modeladas en dos vigas colineales: hacer continua a través del nudo la de la viga
+    /// principal y empalmarla por traslape, fuera del nudo (a 2h de la cara), con la de la opuesta,
+    /// que se corta en el inicio del traslape.
+    /// </summary>
+    public bool SplicePassThroughBars { get; init; } = true;
+
+    /// <summary>Longitud comercial de la varilla (mm); se avisa cuando una barra continua la supera.</summary>
+    public double CommercialBarLength { get; init; } = 9000;
+
+    /// <summary>Separación libre entre las dos barras de un traslape (mm). 0 = traslape en contacto.</summary>
+    public double LapSpliceClearance { get; init; } = 0;
+
     /// <summary>Tolerancia para considerar que una viga "llega" a la columna (mm).</summary>
     public double ContactTolerance { get; init; } = 50;
 

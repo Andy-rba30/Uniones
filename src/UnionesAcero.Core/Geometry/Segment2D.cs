@@ -25,6 +25,13 @@ public readonly record struct Segment2D(Vec2 A, Vec2 B)
 
     public double DistanceTo(Vec2 p) => ClosestPoint(p).DistanceTo(p);
 
+    /// <summary>Distancia mínima entre dos segmentos (0 si se cortan).</summary>
+    public double DistanceTo(Segment2D other)
+    {
+        if (Intersects(other, out _)) return 0;
+        return Math.Min(Math.Min(DistanceTo(other.A), DistanceTo(other.B)), Math.Min(other.DistanceTo(A), other.DistanceTo(B)));
+    }
+
     /// <summary>
     /// Intersección de la recta infinita (origin + t·dir) con este segmento.
     /// Devuelve t sobre la recta y s en [0,1] sobre el segmento.

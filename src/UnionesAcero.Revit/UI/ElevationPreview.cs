@@ -173,13 +173,24 @@ public sealed class ElevationPreview : Canvas
                     StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, StrokeLineJoin = PenLineJoin.Round, ToolTip = tip
                 });
             }
-            var zDim = f.Layer == BarLayer.Top ? f.Elevation + 2.5 * bar.Diameter + 40 : f.Elevation - 2.5 * bar.Diameter - 40;
-            Dimension(X(0), X(f.ProvidedLength), Y(zDim), PreviewColors.Fixed, $"prov. {f.ProvidedLength:0}");
-            var zReq = f.Layer == BarLayer.Top ? zDim + 60 : zDim - 60;
-            Dimension(X(0), X(f.RequiredLength), Y(zReq), PreviewColors.Dim, $"req. {(f.EndHook != null ? "ldh" : "ld")} {f.RequiredLength:0}");
-            var label = $"corregir {bar.Count}Ø{bar.Diameter:0} {JointAnalyzer.LayerName(f.Layer)}: {JointAnalyzer.DecisionName(f.Decision)}" +
+            string label;
+            if (f.Decision == AnchorageDecision.PassThrough)
+            {
+                // Empalme fuera del nudo: la barra continúa (o se corta) más allá de la columna; sin cotas de anclaje.
+                label = $"{bar.Count}Ø{bar.Diameter:0} {JointAnalyzer.LayerName(f.Layer)}: {(f.EndShift >= 0 ? "continua a través del nudo" : "cortada en el inicio del traslape")}" +
+                        $" · lst {f.RequiredLength:0} mm · extremo {f.EndShift:+0;-0} mm";
+            }
+            else
+            {
+                var zDim = f.Layer == BarLayer.Top ? f.Elevation + 2.5 * bar.Diameter + 40 : f.Elevation - 2.5 * bar.Diameter - 40;
+                Dimension(X(0), X(f.ProvidedLength), Y(zDim), PreviewColors.Fixed, $"prov. {f.ProvidedLength:0}");
+                var zReq = f.Layer == BarLayer.Top ? zDim + 60 : zDim - 60;
+                Dimension(X(0), X(f.RequiredLength), Y(zReq), PreviewColors.Dim, $"req. {(f.EndHook != null ? "ldh" : "ld")} {f.RequiredLength:0}");
+                label = $"corregir {bar.Count}Ø{bar.Diameter:0} {JointAnalyzer.LayerName(f.Layer)}: {JointAnalyzer.DecisionName(f.Decision)}" +
                         (f.EndHook != null ? $" (hacia {(f.EndHook.Direction.Z < 0 ? "abajo" : "arriba")})" : "") +
                         $" · extremo {f.EndShift:+0;-0} mm";
+            }
+            if (f.Adjustments.Count > 0) label += " · " + string.Join(" · ", f.Adjustments.Select(a => { var cut = a.IndexOf(" (", StringComparison.Ordinal); return cut > 0 ? a[..cut] : a; }));
             Text(label, labelX, labelY, PreviewColors.Fixed, 10, true).MaxWidth = labelW;
             labelY += 30;
         }

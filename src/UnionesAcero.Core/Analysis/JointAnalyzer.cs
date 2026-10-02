@@ -17,7 +17,15 @@ public sealed class JointAnalyzer
         _options = options ?? new JointOptions();
     }
 
-    public JointAnalysis Analyze(ColumnSection column, IEnumerable<BeamSection> beams)
+    /// <param name="column">Sección de la columna (mm, coordenadas de planta del proyecto).</param>
+    /// <param name="beams">Vigas que pueden llegar a la columna.</param>
+    /// <param name="resolveClashes">
+    /// Aplicar al final el <see cref="JointDetailer"/> (paso por dentro de las verticales de la columna,
+    /// ganchos en la misma esquina y cruces a la misma cota) sobre las barras nuevas. Se pone a false
+    /// cuando quien llama va a combinar las barras nuevas con correcciones de barras existentes y
+    /// aplicarlo él mismo.
+    /// </param>
+    public JointAnalysis Analyze(ColumnSection column, IEnumerable<BeamSection> beams, bool resolveClashes = true)
     {
         var analysis = new JointAnalysis { Column = column, Options = _options };
         var beamList = beams.ToList();
@@ -46,8 +54,8 @@ public sealed class JointAnalyzer
             if (joint.OppositeBeam != null) passThroughHandled.Add(joint.Beam);
         }
 
-        // 4. Cruces entre barras de vigas distintas dentro del nudo.
-        ResolveCrossings(analysis);
+        // 4. Choques dentro del nudo: verticales de la columna, ganchos en la misma esquina y cruces.
+        if (resolveClashes) new JointDetailer(_options).Apply(analysis);
 
         return analysis;
     }
@@ -395,83 +403,6 @@ public sealed class JointAnalyzer
         var lap = _options.Code.LapSpliceLength(ctx).Length;
         return RoundUp(2 * beam.Depth + lap);
     }
-
-    // ---------------------------------------------------------------------------------
-    // Cruces de barras
-    // ---------------------------------------------------------------------------------
-
-    private void ResolveCrossings(JointAnalysis analysis)
-    {
-        var joints = analysis.Joints.Where(j => j.Connected).ToList();
-        for (var i = 0; i < joints.Count; i++)
-        {
-            for (var k = i + 1; k < joints.Count; k++)
-            {
-                var a = joints[i];
-                var b = joints[k];
-                if (ReferenceEquals(a.OppositeBeam, b.Beam)) continue; // colineales: no se cruzan
-                var angle = GeometryUtil.RadToDeg(GeometryUtil.AngleBetween(a.InwardDirection, b.InwardDirection));
-                if (angle < _options.CollinearAngleTolerance || angle > 180 - _options.CollinearAngleTolerance) continue;
-
-                // ¿Las franjas de barras se cruzan dentro de la columna?
-                var segA = new Segment2D(a.ContactPoint, a.ContactPoint + a.InwardDirection * a.AvailableDepth);
-                var segB = new Segment2D(b.ContactPoint, b.ContactPoint + b.InwardDirection * b.AvailableDepth);
-                if (!StripsCross(segA, a.Beam.Width, segB, b.Beam.Width)) continue;
-
-                foreach (var layer in _options.Layers)
-                {
-                    var la = a.Layers.FirstOrDefault(l => l.Layer == layer);
-                    var lb = b.Layers.FirstOrDefault(l => l.Layer == layer);
-                    if (la?.Group == null || lb?.Group == null) continue;
-                    var minSep = (la.Group.Diameter + lb.Group.Diameter) / 2 + _options.CrossingClearance;
-                    var dz = Math.Abs(la.Elevation - lb.Elevation);
-                    if (dz >= minSep) continue;
-
-                    if (_options.AutoStaggerCrossingLayers)
-                    {
-                        var shift = layer == BarLayer.Top ? -(minSep - dz) : (minSep - dz);
-                        var shifted = ShiftGroup(lb.Group, shift);
-                        var idx = b.Layers.IndexOf(lb);
-                        b.Layers[idx] = new LayerResult
-                        {
-                            Layer = lb.Layer, Decision = lb.Decision, Elevation = lb.Elevation + shift,
-                            StraightRequired = lb.StraightRequired, HookRequired = lb.HookRequired, Provided = lb.Provided,
-                            Formula = lb.Formula, Group = shifted
-                        };
-                        b.Diagnostics.Add(new Diagnostic(Severity.Info, b.Beam.Name,
-                            $"Capa {LayerName(layer)}: las barras se cruzan con las de {a.Beam.Name} en el nudo; la capa se desplaza {shift:+0;-0} mm para pasar {(shift < 0 ? "por debajo" : "por encima")}."));
-                    }
-                    else
-                    {
-                        b.Diagnostics.Add(new Diagnostic(Severity.Warning, b.Beam.Name,
-                            $"Capa {LayerName(layer)}: las barras se cruzan con las de {a.Beam.Name} a la misma cota (Δz = {dz:0} mm < {minSep:0} mm). Desplazar una capa."));
-                    }
-                }
-            }
-        }
-    }
-
-    private static bool StripsCross(Segment2D a, double widthA, Segment2D b, double widthB)
-    {
-        if (a.Intersects(b, out _)) return true;
-        var d = Math.Min(Math.Min(a.DistanceTo(b.A), a.DistanceTo(b.B)), Math.Min(b.DistanceTo(a.A), b.DistanceTo(a.B)));
-        return d <= (widthA + widthB) / 2;
-    }
-
-    private static BarGroup ShiftGroup(BarGroup g, double dz)
-    {
-        var d = new Vec3(0, 0, dz);
-        return new BarGroup
-        {
-            BeamName = g.BeamName, BeamSourceId = g.BeamSourceId, Layer = g.Layer, Diameter = g.Diameter, BarTypeName = g.BarTypeName, Count = g.Count, Spacing = g.Spacing,
-            Decision = g.Decision, Centerline = g.Centerline.Select(p => p + d).ToList(), EndHook = g.EndHook,
-            FullCenterline = g.FullCenterline.Select(p => p + d).ToList(), PlaneNormal = g.PlaneNormal, ArrayDirection = g.ArrayDirection,
-            Elevation = g.Elevation + dz, RequiredLength = g.RequiredLength, ProvidedLength = g.ProvidedLength, Formula = g.Formula,
-            Comment = g.Comment + $" [capa desplazada {dz:+0;-0} mm]"
-        };
-    }
-
-    // ---------------------------------------------------------------------------------
 
     private double RoundUp(double v) => GeometryUtil.RoundUpTo(v, _options.LengthRounding);
 
