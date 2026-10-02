@@ -82,6 +82,10 @@ desde su extremo lejano hasta la columna y el nuevo anclaje, y después se borra
 tenía gancho en el extremo lejano, ese gancho se conserva como tramo de la barra. Las barras repartidas en
 una dirección que no es la lateral de la viga no se corrigen automáticamente (se avisa). Si una misma viga
 llega a dos columnas seleccionadas, la segunda corrección se replantea sobre la barra ya corregida.
+La barra corregida es un elemento nuevo (su id sale en el informe): hereda de la original las vistas en las
+que se mostraba *sin obstrucción* y, como las barras nuevas, se muestra sin obstrucción en la vista activa
+(en Revit ese estado es por barra y por vista y no se copia solo; sin él, una barra nueva queda oculta
+dentro del hormigón en las vistas 3D sombreadas y parece borrada).
 
 ## Cómo decide el anclaje
 

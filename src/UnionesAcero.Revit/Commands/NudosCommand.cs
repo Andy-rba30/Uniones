@@ -110,6 +110,7 @@ public sealed class NudosCommand : IExternalCommand
                                 var g = plan.NewGroup;
                                 var rebar = CreateWithHookCheck(doc, builder, item, g, beam.Element, flipped, out var why);
                                 if (rebar == null) { failed.Add(g.Label + why); continue; }
+                                builder.ShowUnobscured(rebar, doc.ActiveView);
                                 created.Add(rebar.Id);
                                 newCount++;
                                 made.Add(g.Label + " " + JointAnalyzer.DecisionName(g.Decision));
@@ -167,6 +168,7 @@ public sealed class NudosCommand : IExternalCommand
                                     doc.Delete(target.Id);
                                     if (!rebar.IsValidObject)
                                         throw new InvalidOperationException($"{fix.Label}: al borrar la barra original Revit eliminó también la barra corregida.");
+                                    builder.ShowUnobscured(rebar, doc.ActiveView);
                                     replaced[bar.Id] = rebar;
                                     replaced[targetId] = rebar;
                                     created.RemoveAll(id => id.Value == targetId);
@@ -211,6 +213,7 @@ public sealed class NudosCommand : IExternalCommand
 
         var toSelect = created.Where(id => doc.GetElement(id) != null).ToList();
         if (toSelect.Count > 0) uidoc.Selection.SetElementIds(toSelect);
+        if (fixedCount > 0) log.Add("Las barras corregidas son elementos nuevos (ids entre corchetes): si no se ven en una vista, actívalas con Modificar > Estados de visibilidad de vista, o búscalas con Gestionar > Seleccionar por ID.");
         if (builder.Notes.Count > 0) log.Add("Avisos: " + string.Join(" | ", builder.Notes.Distinct()));
         if (builderNotes(items, out var notes)) log.Add(notes);
 

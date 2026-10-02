@@ -220,12 +220,46 @@ public sealed class RebarBuilder
         if (positions > 1 && arrayLength > 1e-9)
             rebar.GetShapeDrivenAccessor().SetLayoutAsFixedNumber(positions, arrayLength, onNormalSide, includeFirstBar: true, includeLastBar: true);
 
+        // La visibilidad "sin obstrucción" es por barra y por vista y NO se hereda: una barra nueva
+        // queda oculta dentro del hormigón en las vistas 3D sombreadas, así que al sustituir la
+        // original parecía que la barra de la viga se había borrado. Se copia vista por vista.
+        CopyViewVisibility(existing, rebar);
+
         var comments = rebar.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS);
         if (comments != null && !comments.IsReadOnly)
             comments.Set($"UnionesAcero: corregida (sustituye a {existing.Id.Value}). {fix.Message}");
 
         return rebar;
     }
+
+    /// <summary>Copia a <paramref name="to"/> las vistas en las que <paramref name="from"/> se muestra sin obstrucción.</summary>
+    public void CopyViewVisibility(Rebar from, Rebar to)
+    {
+        foreach (var view in Views())
+        {
+            try
+            {
+                if (from.IsUnobscuredInView(view)) to.SetUnobscuredInView(view, true);
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException)
+            {
+                // vista sin datos de visibilidad para esta barra: se ignora
+            }
+        }
+    }
+
+    /// <summary>Muestra la barra sin obstrucción en la vista dada (normalmente la activa), para que se vea al terminar.</summary>
+    public void ShowUnobscured(Rebar rebar, View? view)
+    {
+        if (view == null || view.IsTemplate) return;
+        try { rebar.SetUnobscuredInView(view, true); }
+        catch (Autodesk.Revit.Exceptions.ApplicationException) { }
+    }
+
+    private List<View>? _views;
+
+    private List<View> Views() => _views ??= new FilteredElementCollector(_doc).OfClass(typeof(View)).Cast<View>()
+        .Where(v => !v.IsTemplate).ToList();
 
     private RebarBarType? ClosestBarType(double diameterMm)
     {
