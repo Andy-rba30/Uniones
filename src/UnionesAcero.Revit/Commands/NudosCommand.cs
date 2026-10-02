@@ -69,7 +69,7 @@ public sealed class NudosCommand : IExternalCommand
         var log = new List<string>();
         var created = new List<ElementId>();
         var failingExisting = new List<ElementId>();
-        int armed = 0, rejected = 0, fixedCount = 0;
+        int armed = 0, rejected = 0, newCount = 0, fixedCount = 0;
         // Barras ya sustituidas en esta ejecución (una viga llega a dos columnas seleccionadas): id original → barra nueva.
         var replaced = new Dictionary<long, Rebar>();
         var builder = new RebarBuilder(doc) { HookTypeName = cfg.HookTypeName };
@@ -111,6 +111,7 @@ public sealed class NudosCommand : IExternalCommand
                                 var rebar = CreateWithHookCheck(doc, builder, item, g, beam.Element, flipped, out var why);
                                 if (rebar == null) { failed.Add(g.Label + why); continue; }
                                 created.Add(rebar.Id);
+                                newCount++;
                                 made.Add(g.Label + " " + JointAnalyzer.DecisionName(g.Decision));
                             }
                             else if (plan.Action == LayerAction.FixExisting)
@@ -120,7 +121,9 @@ public sealed class NudosCommand : IExternalCommand
                                     var fix = fix0;
                                     var target = oldRebar;
                                     // Si ya se sustituyó en otra columna, se vuelve a planificar sobre la barra nueva.
-                                    if (replaced.TryGetValue(oldRebar.Id.Value, out var newer))
+                                    // Se busca por el id leído en el análisis (bar.Id): el objeto oldRebar puede estar
+                                    // ya borrado y entonces hasta leer su Id lanza InvalidObjectException.
+                                    if (replaced.TryGetValue(bar.Id, out var newer))
                                     {
                                         target = newer;
                                         var fresh = RebarInspector.Describe(doc, newer, bar.BeamName);
@@ -157,9 +160,16 @@ public sealed class NudosCommand : IExternalCommand
                                             flipped.Add(fix.Label);
                                         }
                                     }
+                                    // El id se toma ANTES de borrar: después de doc.Delete, cualquier acceso a la barra
+                                    // borrada (incluso .Id) lanza "The referenced object is not valid, possibly because
+                                    // it has been deleted from the database", lo que deshacía toda la columna.
+                                    var targetId = target.Id.Value;
                                     doc.Delete(target.Id);
-                                    replaced[oldRebar.Id.Value] = rebar;
-                                    replaced[target.Id.Value] = rebar;
+                                    if (!rebar.IsValidObject)
+                                        throw new InvalidOperationException($"{fix.Label}: al borrar la barra original Revit eliminó también la barra corregida.");
+                                    replaced[bar.Id] = rebar;
+                                    replaced[targetId] = rebar;
+                                    created.RemoveAll(id => id.Value == targetId);
                                     created.Add(rebar.Id);
                                     fixedCount++;
                                     fixedBars.Add($"{fix.Label} -> {JointAnalyzer.DecisionName(fix.Decision)} ({fix.EndShift:+0;-0} mm)");
@@ -199,13 +209,14 @@ public sealed class NudosCommand : IExternalCommand
             tx.Commit();
         }
 
-        if (created.Count > 0) uidoc.Selection.SetElementIds(created);
+        var toSelect = created.Where(id => doc.GetElement(id) != null).ToList();
+        if (toSelect.Count > 0) uidoc.Selection.SetElementIds(toSelect);
         if (builder.Notes.Count > 0) log.Add("Avisos: " + string.Join(" | ", builder.Notes.Distinct()));
         if (builderNotes(items, out var notes)) log.Add(notes);
 
         var td = new TaskDialog("Nudos viga-columna")
         {
-            MainInstruction = $"{created.Count - fixedCount} conjunto(s) de barras nuevos y {fixedCount} corregido(s) en {armed} de {columns.Count} columna(s)." +
+            MainInstruction = $"{newCount} conjunto(s) de barras nuevos y {fixedCount} corregido(s) en {armed} de {columns.Count} columna(s)." +
                               (failingExisting.Count > 0 ? $" {failingExisting.Count} barra(s) existente(s) siguen sin cumplir (en rojo en la vista)." : ""),
             MainContent = string.Join(Environment.NewLine, log)
         };
@@ -241,11 +252,15 @@ public sealed class NudosCommand : IExternalCommand
         return rebar;
     }
 
+    /// <summary>
+    /// Barras existentes que no cumplen, por el id leído en el análisis. No se toca el objeto Rebar:
+    /// si la barra se acaba de sustituir ya está borrada y cualquier acceso a ella lanzaría excepción.
+    /// </summary>
     private static void CollectFailing(ColumnItem item, List<ElementId> failing)
     {
         foreach (var b in item.Beams)
-            foreach (var (rebar, bar) in b.ExistingBars)
-                if (b.Checks.Any(c => c.Id == bar.Id && c.Status == CheckStatus.Fail)) failing.Add(rebar.Id);
+            foreach (var (_, bar) in b.ExistingBars)
+                if (b.Checks.Any(c => c.Id == bar.Id && c.Status == CheckStatus.Fail)) failing.Add(new ElementId(bar.Id));
     }
 
     private static bool builderNotes(List<ColumnItem> items, out string notes)
