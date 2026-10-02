@@ -5,6 +5,7 @@ using Autodesk.Revit.DB.Structure;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
 using UnionesAcero.Core.Analysis;
+using UnionesAcero.Core.Model;
 using UnionesAcero.Core.Verification;
 using UnionesAcero.Revit.Selection;
 using UnionesAcero.Revit.Services;
@@ -138,16 +139,16 @@ public sealed class NudosCommand : IExternalCommand
 
                                     var rebar = builder.CreateFixed(fix, target, beam.Element);
                                     if (rebar == null) { failed.Add(fix.Label); continue; }
-                                    if (fix.EndHook != null && item.Solid != null)
+                                    if (fix.EndHook != null && item.Section != null)
                                     {
                                         doc.Regenerate();
-                                        if (!HookInsideColumn(rebar, item.Solid))
+                                        if (!HookInsideColumn(rebar, item.Section))
                                         {
                                             doc.Delete(rebar.Id);
                                             rebar = builder.CreateFixed(fix, target, beam.Element, flipHook: true);
                                             if (rebar == null) { failed.Add(fix.Label); continue; }
                                             doc.Regenerate();
-                                            if (!HookInsideColumn(rebar, item.Solid))
+                                            if (!HookInsideColumn(rebar, item.Section))
                                             {
                                                 doc.Delete(rebar.Id);
                                                 failed.Add(fix.Label + " (el gancho queda fuera de la columna con las dos orientaciones; se conserva la barra original)");
@@ -223,14 +224,14 @@ public sealed class NudosCommand : IExternalCommand
         why = "";
         var rebar = builder.Create(g, host);
         if (rebar == null) return null;
-        if (g.EndHook == null || item.Solid == null) return rebar;
+        if (g.EndHook == null || item.Section == null) return rebar;
         doc.Regenerate();
-        if (HookInsideColumn(rebar, item.Solid)) return rebar;
+        if (HookInsideColumn(rebar, item.Section)) return rebar;
         doc.Delete(rebar.Id);
         rebar = builder.Create(g, host, flipHook: true);
         if (rebar == null) return null;
         doc.Regenerate();
-        if (!HookInsideColumn(rebar, item.Solid))
+        if (!HookInsideColumn(rebar, item.Section))
         {
             doc.Delete(rebar.Id);
             why = " (el gancho queda fuera de la columna con las dos orientaciones)";
@@ -255,37 +256,57 @@ public sealed class NudosCommand : IExternalCommand
     }
 
     /// <summary>
-    /// ¿El extremo del gancho (y el centro de la pata) de la primera barra del conjunto queda dentro
-    /// del sólido de la columna? Se comprueba con un segmento corto vertical en cada punto.
+    /// ¿El gancho de la primera barra del conjunto queda dentro de la columna? El gancho se localiza
+    /// comparando el eje con ganchos y sin ganchos, porque Revit puede devolver el recorrido de la
+    /// barra invertido respecto a las curvas con que se creó (gancho al principio en vez de al final):
+    /// suponer que "la última curva es el gancho" llevaba a comprobar el tramo recto que va por la
+    /// viga, que siempre queda fuera de la columna, y a descartar la barra con las dos orientaciones.
+    /// Se comprueban el extremo y el centro de la pata contra la sección de la columna y su altura
+    /// (la misma geometría con la que se calculó el anclaje). Si la barra tiene gancho en los dos
+    /// extremos (el lejano ancla en otra columna) se comprueba solo el más cercano a esta columna.
+    /// Sin gancho reconocible no se bloquea.
     /// </summary>
-    private static bool HookInsideColumn(Rebar rebar, Solid column)
+    private static bool HookInsideColumn(Rebar rebar, ColumnSection column)
     {
-        IList<Curve> curves;
-        try { curves = rebar.GetCenterlineCurves(false, false, false, MultiplanarOption.IncludeOnlyPlanarCurves, 0); }
-        catch { return true; }
-        if (curves.Count == 0) return true;
-        var last = curves[^1];
-        var end = last.GetEndPoint(1);
-        var mid = last.Evaluate(0.5, true);
-        return PointInside(column, end) && PointInside(column, mid);
-    }
-
-    private static bool PointInside(Solid solid, XYZ p)
-    {
-        var d = Units.ToFt(2);
-        var probe = Line.CreateBound(p - new XYZ(0, 0, d), p + new XYZ(0, 0, d));
+        IList<Curve> hooked, bare;
         try
         {
-            var result = solid.IntersectWithCurve(probe, new SolidCurveIntersectionOptions { ResultType = SolidCurveIntersectionMode.CurveSegmentsInside });
-            if (result == null || result.SegmentCount == 0) return false;
-            double inside = 0;
-            for (var i = 0; i < result.SegmentCount; i++) inside += result.GetCurveSegment(i).Length;
-            return inside >= 0.9 * probe.Length;
+            hooked = rebar.GetCenterlineCurves(false, false, false, MultiplanarOption.IncludeOnlyPlanarCurves, 0);
+            bare = rebar.GetCenterlineCurves(false, true, false, MultiplanarOption.IncludeOnlyPlanarCurves, 0);
         }
-        catch
-        {
-            return true; // sin comprobación posible: no bloquear
-        }
+        catch { return true; }
+        if (hooked.Count == 0 || bare.Count == 0) return true;
+
+        var bareStart = bare[0].GetEndPoint(0);
+        var bareEnd = bare[^1].GetEndPoint(1);
+        var tol = Units.ToFt(2);
+        bool IsBareEnd(XYZ p) => p.DistanceTo(bareStart) < tol || p.DistanceTo(bareEnd) < tol;
+
+        // Patas de gancho: tramos extremos del eje con ganchos cuyo extremo no es un extremo del eje sin ganchos.
+        var legs = new List<(Curve Leg, XYZ Tip)>();
+        var first = hooked[0];
+        var last = hooked[^1];
+        if (!IsBareEnd(first.GetEndPoint(0))) legs.Add((first, first.GetEndPoint(0)));
+        if (!IsBareEnd(last.GetEndPoint(1))) legs.Add((last, last.GetEndPoint(1)));
+        if (legs.Count == 0) return true;
+
+        var (leg, tip) = legs.OrderBy(l => DistanceToSection(column, l.Tip)).First();
+        return PointInside(column, tip) && PointInside(column, leg.Evaluate(0.5, true));
+    }
+
+    private static double DistanceToSection(ColumnSection column, XYZ p)
+    {
+        var q = Units.ToMm2(p);
+        return column.Outline.Contains(q) ? 0 : column.Outline.DistanceToBoundary(q);
+    }
+
+    /// <summary>Punto del modelo (pies) dentro de la sección de la columna y entre su base y su coronación.</summary>
+    private static bool PointInside(ColumnSection column, XYZ p)
+    {
+        const double tol = 1.0; // mm
+        var q = Units.ToMm3(p);
+        if (q.Z < column.BottomElevation - tol || q.Z > column.TopElevation + tol) return false;
+        return column.Outline.Contains(q.XY, tol);
     }
 
     private static IList<FamilyInstance> GetColumns(UIDocument uidoc)

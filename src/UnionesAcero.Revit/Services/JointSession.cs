@@ -97,7 +97,6 @@ public sealed class ColumnItem
     public List<BeamItem> Beams { get; } = new();
     public List<string> Notes { get; } = new();
     public JointAnalysis? Analysis { get; set; }
-    public Solid? Solid { get; init; }
 
     public bool CanBuild => Error == null && Section != null && Beams.Count > 0;
 
@@ -162,14 +161,12 @@ public static class JointSession
         var tag = "[" + column.Id.Value + " " + RevitGeometryExtractor.ElementLabel(column) + "] ";
         var extractor = new RevitGeometryExtractor(doc, settings);
         ColumnSection section;
-        Solid? solid;
         ColumnRebarInfo? modelRebar;
         try
         {
             var host = RebarHostData.GetRebarHostData(column);
             if (host == null || !host.IsValidHost())
                 return new ColumnItem { Element = column, Tag = tag, Error = "no admite armadura. Revisa que el material sea hormigón y que sea un pilar estructural." };
-            solid = RevitGeometryExtractor.LargestSolid(column);
             section = extractor.ExtractColumn(column, out modelRebar);
         }
         catch (Exception ex)
@@ -177,7 +174,7 @@ public static class JointSession
             return new ColumnItem { Element = column, Tag = tag, Error = "RECHAZADO, " + ex.Message };
         }
 
-        var item = new ColumnItem { Element = column, Tag = tag, Section = section, Solid = solid, ModelRebar = modelRebar };
+        var item = new ColumnItem { Element = column, Tag = tag, Section = section, ModelRebar = modelRebar };
         foreach (var beam in extractor.FindBeamsNear(column))
         {
             var bs = extractor.ExtractBeam(beam, out var modelBars);

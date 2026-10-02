@@ -176,7 +176,9 @@ dotnet test
 - Las fórmulas están implementadas en MPa con los factores habituales (ψt, ψe, ψg, ψc, λ; α1, α2 en EC2).
   Los casos especiales (barras con cabeza, paquetes de barras, ganchos de 180°) no están cubiertos.
 - La orientación del gancho se calcula con la convención `RebarTerminationOrientation` de la API 2026+
-  (derecha = dirección × normal) y se comprueba contra el sólido de la columna después de crear la barra:
-  si queda fuera se invierte automáticamente.
+  (derecha = dirección × normal) y se comprueba después de crear la barra: se localiza la pata del gancho
+  comparando el eje con y sin ganchos (Revit puede devolver el recorrido invertido, con el gancho al
+  principio) y se verifica que su extremo y su centro queden dentro de la sección de la columna y entre
+  su base y su coronación; si queda fuera se invierte automáticamente.
 - La extensión del gancho la fija el tipo de gancho de Revit; si difiere de la que pide la norma
   (12·db a 90° en ACI) el informe lo avisa.
